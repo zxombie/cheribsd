@@ -81,7 +81,7 @@ static char uncompressed_zeroes[INFLATE_BUFSIZE];
 static const size_t uncompressed_zeroes_len =
 	    sizeof(uncompressed_zeroes) / sizeof(uncompressed_zeroes[0]);
 
-static char compressed_zeroes[] = {
+static uint8_t compressed_zeroes[] = {
 	0x78, 0x9c, 0xed, 0xc1, 0x01, 0x0d, 0x00, 0x00,
 	0x00, 0xc2, 0xa0, 0xf7, 0x4f, 0x6d, 0x0e, 0x37,
 	0xa0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
@@ -92,7 +92,7 @@ static const size_t compressed_zeroes_len =
 	    sizeof(compressed_zeroes) / sizeof(compressed_zeroes[0]);
 
 static void
-check_compressed_data(const char *data, size_t datalen)
+check_compressed_data(const uint8_t *data, size_t datalen)
 {
 	size_t i;
 
