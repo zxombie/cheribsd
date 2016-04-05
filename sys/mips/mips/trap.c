@@ -376,7 +376,7 @@ char *access_name[] = {
 #include <machine/octeon_cop2.h>
 #endif
 
-static int allow_unaligned_acc = 1;
+static int allow_unaligned_acc = 0;
 
 SYSCTL_INT(_vm, OID_AUTO, allow_unaligned_acc, CTLFLAG_RW,
     &allow_unaligned_acc, 0, "Allow unaligned accesses");
