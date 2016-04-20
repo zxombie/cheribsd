@@ -6,7 +6,7 @@
  * created from FreeBSD
  */
 
-#define	CHERIABI_SYS_syscall	0
+				/* 0 is obsolete syscall */
 #define	CHERIABI_SYS_exit	1
 #define	CHERIABI_SYS_fork	2
 #define	CHERIABI_SYS_read	3
@@ -155,7 +155,7 @@
 				/* 149 is obsolete oquota */
 				/* 150 is obsolete ogetsockname */
 #define	CHERIABI_SYS_cheriabi_nlm_syscall	154
-#define	CHERIABI_SYS_nfssvc	155
+#define	CHERIABI_SYS_cheriabi_nfssvc	155
 				/* 156 is obsolete getdirentries */
 				/* 157 is obsolete statfs */
 				/* 158 is obsolete fstatfs */
@@ -185,7 +185,7 @@
 #define	CHERIABI_SYS_setrlimit	195
 #define	CHERIABI_SYS_getdirentries	196
 				/* 197 is obsolete mmap */
-#define	CHERIABI_SYS___syscall	198
+				/* 198 is obsolete __syscall */
 				/* 199 is obsolete lseek */
 				/* 200 is obsolete truncate */
 				/* 201 is obsolete ftruncate */
@@ -203,9 +203,9 @@
 #define	CHERIABI_SYS_msgget	225
 #define	CHERIABI_SYS_msgsnd	226
 #define	CHERIABI_SYS_msgrcv	227
-#define	CHERIABI_SYS_shmat	228
+#define	CHERIABI_SYS_cheriabi_shmat	228
 				/* 229 is obsolete shmctl */
-#define	CHERIABI_SYS_shmdt	230
+#define	CHERIABI_SYS_cheriabi_shmdt	230
 #define	CHERIABI_SYS_shmget	231
 #define	CHERIABI_SYS_clock_gettime	232
 #define	CHERIABI_SYS_clock_settime	233
@@ -279,7 +279,7 @@
 #define	CHERIABI_SYS_sched_rr_get_interval	334
 #define	CHERIABI_SYS_utrace	335
 				/* 336 is obsolete sendfile */
-#define	CHERIABI_SYS_kldsym	337
+#define	CHERIABI_SYS_cheriabi_kldsym	337
 #define	CHERIABI_SYS_cheriabi_jail	338
 #define	CHERIABI_SYS_sigprocmask	340
 #define	CHERIABI_SYS_sigsuspend	341
@@ -382,14 +382,14 @@
 #define	CHERIABI_SYS_auditctl	453
 #define	CHERIABI_SYS__umtx_op	454
 #define	CHERIABI_SYS_cheriabi_thr_new	455
-#define	CHERIABI_SYS_sigqueue	456
+#define	CHERIABI_SYS_cheriabi_sigqueue	456
 #define	CHERIABI_SYS_kmq_open	457
 #define	CHERIABI_SYS_kmq_setattr	458
 #define	CHERIABI_SYS_kmq_timedreceive	459
 #define	CHERIABI_SYS_kmq_timedsend	460
 #define	CHERIABI_SYS_cheriabi_kmq_notify	461
 #define	CHERIABI_SYS_kmq_unlink	462
-#define	CHERIABI_SYS_abort2	463
+#define	CHERIABI_SYS_cheriabi_abort2	463
 #define	CHERIABI_SYS_thr_set_name	464
 #define	CHERIABI_SYS_cheriabi_aio_fsync	465
 #define	CHERIABI_SYS_rtprio_thread	466
@@ -465,7 +465,7 @@
 #define	CHERIABI_SYS_accept4	541
 #define	CHERIABI_SYS_pipe2	542
 #define	CHERIABI_SYS_cheriabi_aio_mlock	543
-#define	CHERIABI_SYS_procctl	544
+#define	CHERIABI_SYS_cheriabi_procctl	544
 #define	CHERIABI_SYS_ppoll	545
 #define	CHERIABI_SYS_futimens	546
 #define	CHERIABI_SYS_utimensat	547

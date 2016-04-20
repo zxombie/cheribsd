@@ -715,13 +715,6 @@ out:
 	return (error);
 }
 
-struct sf_hdtr_c {
-	struct chericap headers;
-	int hdr_cnt;
-	struct chericap trailers;
-	int trl_cnt;
-};
-
 static int
 cheriabi_do_sendfile(struct thread *td,
     struct cheriabi_sendfile_args *uap, int compat)
@@ -1008,6 +1001,34 @@ cheriabi_thr_new(struct thread *td,
 	return (kern_thr_new(td, &param));
 }
 
+int
+cheriabi_sigqueue(struct thread *td, struct cheriabi_sigqueue_args *uap)
+{
+	/*
+	 * XXX-BD: before we can implement this, we need to know how
+	 * we're going to handle uap->value.  At a minimum we need to
+	 * know which situations we'll send a capability and which if any
+	 * we'll send a virtual address.
+	 */
+
+	return (EINVAL);
+}
+
+int
+cheriabi_procctl(struct thread *td, struct cheriabi_procctl_args *uap)
+{
+
+	switch (uap->com) {
+	case PROC_REAP_GETPIDS:
+		/*
+		 * XXX-BD: implement struct procctl_reaper_pids_c
+		 * support in reap_getpids()
+		 */
+		return (EOPNOTSUPP);
+	}
+	return (sys_procctl(td, (struct procctl_args *)uap));
+}
+
 void
 siginfo_to_siginfo_c(const siginfo_t *src, struct siginfo_c *dst)
 {
@@ -1136,6 +1157,30 @@ cheriabi_nmount(struct thread *td,
 
 	free(auio, M_IOV);
 	return (error);
+}
+
+int
+cheriabi_kldsym(struct thread *td, struct cheriabi_kldsym_args *uap)
+{
+
+	/* XXX-BD: split sys_kldsym into kern_kldsym */
+	return (ENOSYS);
+}
+
+int
+cheriabi_abort2(struct thread *td, struct cheriabi_abort2_args *uap)
+{
+	struct abort2_args a2args;
+
+	a2args.why = uap->why;
+	/*
+	 * XXX-BD: need to duplication much of the abort2 logic or
+	 * refactor to support passing array of args in kernelspace.
+	 */
+	a2args.nargs = 0;
+	a2args.args = NULL;
+
+	return (sys_abort2(td, &a2args));
 }
 
 #if 0
@@ -1705,7 +1750,7 @@ cheriabi_mmap_set_retcap(struct thread *td, struct chericap *retcap,
 
 		/*
 		 * If addr was under aligned, we need to return a
-		 * capability to the whole, propertly aligned region
+		 * capability to the whole, properly aligned region
 		 * with the offset pointing to addr.
 		 */
 		CHERI_CGETBASE(addr_base, CHERI_CR_CTEMP0);

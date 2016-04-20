@@ -3,7 +3,6 @@
 # $FreeBSD$
 # created from FreeBSD
 MIASM =  \
-	syscall.o \
 	exit.o \
 	fork.o \
 	read.o \
@@ -104,7 +103,7 @@ MIASM =  \
 	setsid.o \
 	quotactl.o \
 	cheriabi_nlm_syscall.o \
-	nfssvc.o \
+	cheriabi_nfssvc.o \
 	lgetfh.o \
 	getfh.o \
 	cheriabi_sysarch.o \
@@ -122,7 +121,6 @@ MIASM =  \
 	getrlimit.o \
 	setrlimit.o \
 	getdirentries.o \
-	__syscall.o \
 	__sysctl.o \
 	mlock.o \
 	munlock.o \
@@ -135,8 +133,8 @@ MIASM =  \
 	msgget.o \
 	msgsnd.o \
 	msgrcv.o \
-	shmat.o \
-	shmdt.o \
+	cheriabi_shmat.o \
+	cheriabi_shmdt.o \
 	shmget.o \
 	clock_gettime.o \
 	clock_settime.o \
@@ -202,7 +200,7 @@ MIASM =  \
 	sched_get_priority_min.o \
 	sched_rr_get_interval.o \
 	utrace.o \
-	kldsym.o \
+	cheriabi_kldsym.o \
 	cheriabi_jail.o \
 	sigprocmask.o \
 	sigsuspend.o \
@@ -288,14 +286,14 @@ MIASM =  \
 	auditctl.o \
 	_umtx_op.o \
 	cheriabi_thr_new.o \
-	sigqueue.o \
+	cheriabi_sigqueue.o \
 	kmq_open.o \
 	kmq_setattr.o \
 	kmq_timedreceive.o \
 	kmq_timedsend.o \
 	cheriabi_kmq_notify.o \
 	kmq_unlink.o \
-	abort2.o \
+	cheriabi_abort2.o \
 	thr_set_name.o \
 	cheriabi_aio_fsync.o \
 	rtprio_thread.o \
@@ -370,7 +368,7 @@ MIASM =  \
 	accept4.o \
 	pipe2.o \
 	cheriabi_aio_mlock.o \
-	procctl.o \
+	cheriabi_procctl.o \
 	ppoll.o \
 	futimens.o \
 	utimensat.o \

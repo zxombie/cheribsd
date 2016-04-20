@@ -58,7 +58,6 @@ struct {
 	[CHERIABI_SYS_setuid] = {
 	},
 	[CHERIABI_SYS_ptrace] = {
-		.sam_ptrmask = 0x4
 	},
 	[CHERIABI_SYS_cheriabi_recvmsg] = {
 		.sam_ptrmask = 0x2
@@ -251,7 +250,7 @@ struct {
 	[CHERIABI_SYS_cheriabi_nlm_syscall] = {
 		.sam_ptrmask = 0x8
 	},
-	[CHERIABI_SYS_nfssvc] = {
+	[CHERIABI_SYS_cheriabi_nfssvc] = {
 		.sam_ptrmask = 0x2
 	},
 	[CHERIABI_SYS_lgetfh] = {
@@ -333,10 +332,11 @@ struct {
 	[CHERIABI_SYS_msgrcv] = {
 		.sam_ptrmask = 0x2
 	},
-	[CHERIABI_SYS_shmat] = {
+	[CHERIABI_SYS_cheriabi_shmat] = {
+		.sam_return_ptr = 1,
 		.sam_ptrmask = 0x2
 	},
-	[CHERIABI_SYS_shmdt] = {
+	[CHERIABI_SYS_cheriabi_shmdt] = {
 		.sam_ptrmask = 0x1
 	},
 	[CHERIABI_SYS_shmget] = {
@@ -506,7 +506,7 @@ struct {
 	[CHERIABI_SYS_utrace] = {
 		.sam_ptrmask = 0x1
 	},
-	[CHERIABI_SYS_kldsym] = {
+	[CHERIABI_SYS_cheriabi_kldsym] = {
 		.sam_ptrmask = 0x4
 	},
 	[CHERIABI_SYS_cheriabi_jail] = {
@@ -755,7 +755,7 @@ struct {
 	[CHERIABI_SYS_cheriabi_thr_new] = {
 		.sam_ptrmask = 0x1
 	},
-	[CHERIABI_SYS_sigqueue] = {
+	[CHERIABI_SYS_cheriabi_sigqueue] = {
 		.sam_ptrmask = 0x4
 	},
 	[CHERIABI_SYS_kmq_open] = {
@@ -776,7 +776,7 @@ struct {
 	[CHERIABI_SYS_kmq_unlink] = {
 		.sam_ptrmask = 0x1
 	},
-	[CHERIABI_SYS_abort2] = {
+	[CHERIABI_SYS_cheriabi_abort2] = {
 		.sam_ptrmask = 0x1 | 0x4
 	},
 	[CHERIABI_SYS_thr_set_name] = {
@@ -987,7 +987,7 @@ struct {
 	[CHERIABI_SYS_cheriabi_aio_mlock] = {
 		.sam_ptrmask = 0x1
 	},
-	[CHERIABI_SYS_procctl] = {
+	[CHERIABI_SYS_cheriabi_procctl] = {
 		.sam_ptrmask = 0x8
 	},
 	[CHERIABI_SYS_ppoll] = {
