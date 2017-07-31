@@ -46,13 +46,15 @@ int	freebsd7_semctl(int semid, int semnum, int cmd, ...);
 #endif
 
 int
-semctl(int semid, int semnum, int cmd, ...)
+semctl(int semid, int semnum, ...)
 {
+	int cmd;
 	va_list ap;
 	union semun semun;
 	union semun *semun_ptr;
 
-	va_start(ap, cmd);
+	va_start(ap, semnum);
+	cmd = va_arg(ap, int);
 	if (cmd == IPC_SET || cmd == IPC_STAT || cmd == GETALL
 	    || cmd == SETVAL || cmd == SETALL) {
 		semun = va_arg(ap, union semun);

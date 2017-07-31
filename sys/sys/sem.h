@@ -144,7 +144,7 @@ __BEGIN_DECLS
 #if __BSD_VISIBLE
 int semsys(int, ...);
 #endif
-int semctl(int, int, int, ...);
+int semctl(int, int, ...);
 int semget(key_t, int, int);
 int semop(int, struct sembuf *, size_t);
 __END_DECLS
