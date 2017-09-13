@@ -784,12 +784,12 @@ meta_cmd_finish(void *pbmp)
     int error = 0;
 #ifdef USE_FILEMON
     BuildMon *pbm = pbmp;
-    int x;
 
     if (!pbm)
 	pbm = &Mybm;
 
     if (pbm->filemon_fd >= 0) {
+	int x;
 	if (close(pbm->filemon_fd) < 0)
 	    error = errno;
 	x = filemon_read(pbm->mfp, pbm->mon_fd);
