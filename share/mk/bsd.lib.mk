@@ -265,6 +265,11 @@ _LIBS+=		${SHLIB_NAME}.dump
 CLEANFILES+=	${SHLIB_NAME}.dump
 .endif
 
+.if defined(LINKER_TYPE) && ${LINKER_TYPE} == "lld"
+# HACK: should only enable this for the libraries that need it
+# LLD defaults to errors on text relocations
+SOLINKOPTS+=	-Wl,-z,notext
+.endif
 .if target(beforelinking)
 beforelinking: ${SOBJS}
 ${SHLIB_NAME_FULL}: beforelinking
