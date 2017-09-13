@@ -2,6 +2,7 @@
 # $FreeBSD$
 
 .include <src.opts.mk>
+.include <host-target.mk>
 
 # XXX MISSING:		deroff diction graph learn plot
 #			spell spline struct xsend
@@ -284,7 +285,10 @@ SUBDIR.${MK_TOOLCHAIN}+=	rpcgen
 SUBDIR.${MK_TOOLCHAIN}+=	unifdef
 SUBDIR.${MK_TOOLCHAIN}+=	size
 SUBDIR.${MK_TOOLCHAIN}+=	strings
-.if ${MACHINE_ARCH} != "aarch64" # ARM64TODO xlint does not build
+# lint build currently requires an existing lint binary which will not work
+# when crossbuilding from e.g. Linux
+.if ${HOST_OS} == "FreeBSD" && ${MACHINE_ARCH} != "aarch64"
+# ARM64TODO xlint does not build
 SUBDIR.${MK_TOOLCHAIN}+=	xlint
 .endif
 SUBDIR.${MK_TOOLCHAIN}+=	xstr
