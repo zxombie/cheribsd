@@ -29,7 +29,9 @@
  */
 
 #include <sys/cdefs.h>
+#if __has_include(<sys/endian.h>)
 #include <sys/endian.h>
+#endif
 
 #include <assert.h>
 #include <errno.h>
