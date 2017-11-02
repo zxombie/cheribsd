@@ -145,6 +145,10 @@ CWARNFLAGS+=	-Wno-error=misleading-indentation	\
 		-Wno-error=unused-const-variable
 .endif
 
+.if ${COMPILER_TYPE} == "clang" && ${COMPILER_VERSION} >= 60000
+CWARNFLAGS+=	-Wno-error=tautological-constant-compare
+.endif
+
 # How to handle FreeBSD custom printf format specifiers.
 .if ${COMPILER_TYPE} == "clang" && ${COMPILER_VERSION} >= 30600
 FORMAT_EXTENSIONS=	-D__printf__=__freebsd_kprintf__
