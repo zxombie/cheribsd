@@ -89,6 +89,11 @@ _CHERI_COMMON_FLAGS+=	-mllvm -cheri-exact-equals
 # Turn off deprecated warnings
 _CHERI_COMMON_FLAGS+= -Wno-deprecated-declarations
 
+.if ${WANT_CHERI} == "sandbox"
+MK_DEBUG_FILES:=no
+STRIP:=
+.endif
+
 .if ${WANT_CHERI} == "pure" || ${WANT_CHERI} == "sandbox"
 OBJCOPY:=	objcopy
 MIPS_ABI=	purecap
@@ -111,9 +116,6 @@ _LIB_OBJTOP=	${ROOTOBJDIR}
 .endif
 .ifdef LIBCHERI
 LDFLAGS+=	-Wl,-init=crt_init_globals
-.endif
-.if ${WANT_CHERI} == "sandbox"
-CHERI_LLD_BROKEN=	yes
 .endif
 # remove any conflicting -fuse-ld= flags
 LDFLAGS:=${LDFLAGS:N-fuse-ld=*}
@@ -140,11 +142,13 @@ STATIC_CFLAGS+= -ftls-model=local-exec # MIPS/hybrid case
 .endif
 
 .if ${MK_CHERI128} == "yes"
-_CHERI_COMMON_FLAGS+=	-mllvm -cheri128
-# XXX: Needed as Clang rejects -mllvm -cheri128 when using $CC to link.
-_CHERI_CFLAGS+=	-Qunused-arguments
+_CHERI_COMMON_FLAGS+=	-cheri=128
+.else
+_CHERI_COMMON_FLAGS+=	-cheri=256
 .endif
-
+# XXX: Needed as Clang rejects -mllvm -cheri128 when using $CC to link:
+# warning: argument unused during compilation: '-cheri=128'
+_CHERI_CFLAGS+=	-Qunused-arguments
 .if ${WANT_CHERI} != "variables"
 .if ${MK_CHERI_SHARED} == "no" || defined(CHERI_NO_SHARED)
 NO_SHARED=	yes
