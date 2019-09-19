@@ -38,8 +38,8 @@ static inline int
 vm_caprevoke_should_visit_page(vm_page_t m, int flags)
 {
 	/*
-	 * Always visit recently-capdirty pages, but without the side-effect
-	 * of clearing what might be a shared bit.
+	 * If a page is capdirty, visit this page.  On incremental passes,
+	 * this should catch a superset of the pages we need to visit.
 	 */
 	if (m->aflags & PGA_CAPSTORED)
 		return 1;
@@ -100,9 +100,9 @@ retry:
 
 	/*
 	 * Update VPO_PASTCAPSTORE to record the results of
-	 * this sweep.  Even if we clear it here, it's
-	 * entirely possible that PGA_CAPSTORED has become
-	 * set again in the interim.
+	 * this sweep.  Even though we cleared PGA_CAPSTORED before
+	 * calling this function, it's entirely possible that it
+	 * has become set again in the interim.
 	 */
 	if (hascaps & VM_CAPREVOKE_PAGE_HASCAPS) {
 		m->oflags |= VPO_PASTCAPSTORE;

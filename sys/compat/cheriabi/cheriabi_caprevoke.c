@@ -423,7 +423,7 @@ fast_out:
 		 * This pass can be incremental if we had previously done an
 		 * init pass, either just now or earlier.  In either case,
 		 * we'll have entryst == CAPREVST_INIT_DONE; there's no need
-		 * to look at CAPREVOKE_NO_EARLY_PASS.
+		 * to look at CAPREVOKE_LAST_NO_EARLY.
 		 */
 		res = vm_caprevoke(&vmcrc,
 			((entryst == CAPREVST_INIT_DONE)
