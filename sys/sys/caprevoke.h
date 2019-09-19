@@ -248,16 +248,24 @@ struct caprevoke_stats {
 		 * but shouldn't influence correctness.
 		 */
 
-	uint64_t	pages_scanned;
-	uint64_t	pages_retried;
 	uint64_t	page_scan_cycles;
 
-	uint64_t	pages_faulted_ro;
-	uint64_t	pages_faulted_rw;
-	uint64_t	pages_fault_skip;
+	uint32_t	pages_retried;
+	uint32_t	pages_scan_ro;
+	uint32_t	pages_scan_rw;
 
-	uint64_t	caps_found;
-	uint64_t	caps_cleared;
+	uint32_t	pages_faulted_ro;
+	uint32_t	pages_faulted_rw;
+
+	uint32_t	pages_skip_fast;
+	uint32_t	pages_skip;
+
+	uint32_t	caps_found;
+	uint32_t	caps_found_revoked;
+
+	uint32_t	caps_cleared;
+
+	uint32_t	__spare[4];
 };
 
 struct caprevoke_info {

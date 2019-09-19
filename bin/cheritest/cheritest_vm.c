@@ -688,24 +688,30 @@ fprintf_caprevoke_stats(FILE *f, struct caprevoke_stats crst, uint32_t cycsum)
 	fprintf(f, "revoke:"
 		" einit=%" PRIu64
 		" efini=%" PRIu64
-		" pscan=%" PRIu64
+		" psro=%" PRIu32
+		" psrw=%" PRIu32
 		" scanc=%" PRIu64
-		" pfsk=%" PRIu64
-		" pfro=%" PRIu64
-		" pfrw=%" PRIu64
-		" prty=%" PRIu64
-		" caps=%" PRIu64
-		" crev=%" PRIu64
+		" psk=%" PRIu32
+		" pskf=%" PRIu32
+		" pfro=%" PRIu32
+		" pfrw=%" PRIu32
+		" prty=%" PRIu32
+		" caps=%" PRIu32
+		" crevd=%" PRIu32
+		" cnuke=%" PRIu32
 		" totc=%" PRIu32 "\n",
 		crst.epoch_init,
 		crst.epoch_fini,
-		crst.pages_scanned,
+		crst.pages_scan_ro,
+		crst.pages_scan_rw,
 		crst.page_scan_cycles,
-		crst.pages_fault_skip,
+		crst.pages_skip,
+		crst.pages_skip_fast,
 		crst.pages_faulted_ro,
 		crst.pages_faulted_rw,
 		crst.pages_retried,
 		crst.caps_found,
+		crst.caps_found_revoked,
 		crst.caps_cleared,
 		cycsum);
 }

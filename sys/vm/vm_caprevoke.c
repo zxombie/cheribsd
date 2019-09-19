@@ -82,7 +82,7 @@ vm_caprevoke_visit_rw(const struct vm_caprevoke_cookie *crc, int flags,
 	VM_OBJECT_WUNLOCK(obj);
 
 retry:
-	CAPREVOKE_STATS_BUMP(crst, pages_scanned);
+	CAPREVOKE_STATS_BUMP(crst, pages_scan_rw);
 	hascaps = vm_caprevoke_page(crc, m);
 
 	/* CAS failures cause us to revisit */
@@ -130,7 +130,7 @@ vm_caprevoke_visit_ro(const struct vm_caprevoke_cookie *crc, int flags,
 		return VM_CAPREVOKE_VIS_BUSY;
 	VM_OBJECT_WUNLOCK(obj);
 
-	CAPREVOKE_STATS_BUMP(crst, pages_scanned);
+	CAPREVOKE_STATS_BUMP(crst, pages_scan_ro);
 	hascaps = vm_caprevoke_page_ro(crc, m);
 
 	KASSERT(!(hascaps & VM_CAPREVOKE_PAGE_HASCAPS)
@@ -211,12 +211,12 @@ vm_caprevoke_object_at(const struct vm_caprevoke_cookie *crc, int flags,
 
 			if ((obj_next_pg == NULL)
 			    || (obj_next_pg->pindex >= OFF_TO_IDX(lastoff))) {
-				CAPREVOKE_STATS_INC(crst, pages_fault_skip,
+				CAPREVOKE_STATS_INC(crst, pages_skip_fast,
 					(entry->end - addr) >> PAGE_SHIFT);
 				*ooff = lastoff;
 			} else {
 				*ooff = IDX_TO_OFF(obj_next_pg->pindex);
-				CAPREVOKE_STATS_INC(crst, pages_fault_skip,
+				CAPREVOKE_STATS_INC(crst, pages_skip_fast,
 					obj_next_pg->pindex - ipi);
 			}
 			return VM_CAPREVOKE_AT_OK;
@@ -260,8 +260,10 @@ vm_caprevoke_object_at(const struct vm_caprevoke_cookie *crc, int flags,
 	}
 
 	if (pmap_page_is_write_mapped(m)) {
-		if (!vm_caprevoke_should_visit_page(m, flags))
+		if (!vm_caprevoke_should_visit_page(m, flags)) {
+			CAPREVOKE_STATS_BUMP(crst, pages_skip);
 			goto visit_rw_ok;
+		}
 
 		/* The page is writable; just go do the revocation in place */
 		goto visit_rw;
@@ -269,6 +271,7 @@ vm_caprevoke_object_at(const struct vm_caprevoke_cookie *crc, int flags,
 
 	if (!vm_caprevoke_should_visit_page(m, flags)) {
 		*ooff = ioff + pagesizes[m->psind];
+		CAPREVOKE_STATS_BUMP(crst, pages_skip);
 		return VM_CAPREVOKE_AT_OK;
 	}
 

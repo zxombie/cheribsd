@@ -193,8 +193,9 @@ vm_do_caprevoke(const struct vm_caprevoke_cookie *crc,
 		if ((cheri_getperm(cut) != 0) || (cheri_getsealed(cut) != 0)) {
 			CAPREVOKE_STATS_BUMP(crst, caps_found);
 			res = VM_CAPREVOKE_PAGE_HASCAPS;
+		} else {
+			CAPREVOKE_STATS_BUMP(crst, caps_found_revoked);
 		}
-		// XXX else crc->stats->caps_found_revoked++;
 	}
 
 	return res;
