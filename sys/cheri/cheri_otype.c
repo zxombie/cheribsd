@@ -89,6 +89,7 @@ cheri_otype_free(otype_t cap)
 }
 
 #ifdef CHERI_CAPREVOKE
+#ifndef CHERI_CAPREVOKE_CLEARTAGS
 
 /* If this changes, make the comment in sys/sys/caprevoke.h match! */
 void * __capability
@@ -99,4 +100,5 @@ cheri_revoke_sealed(void * __capability c)
 	return c;
 }
 
+#endif
 #endif

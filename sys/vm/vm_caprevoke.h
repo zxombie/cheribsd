@@ -47,7 +47,7 @@ struct vm_page;
 
 /***************************** REVOCATION ITSELF *****************************/
 
-  /* cheri/cheric.c */
+  /* sys/.../cheri/cheri_otype.c */
 void * __capability cheri_revoke_sealed(void * __capability r);
 
 /*
@@ -63,10 +63,15 @@ void * __capability cheri_revoke_sealed(void * __capability r);
 static __always_inline inline void * __capability
 cheri_revoke(void * __capability c)
 {
+#ifndef CHERI_CAPREVOKE_CLEARTAGS
 	if (__builtin_expect(cheri_gettype(c) == -1, 1)) {
 		return cheri_andperm(c, 0);
 	}
 	return cheri_revoke_sealed(c);
+#else
+	/* No need to handle sealed things specially */
+	return cheri_cleartag(c);
+#endif
 }
 
 /***************************** KERNEL MI LAYER ******************************/
