@@ -179,6 +179,19 @@ static inline int caprevoke_epoch_clears(caprevoke_epoch now,
 #define CAPREVOKE_LAST_NO_LATE	0x020
 
 	/*
+	 * Force a synchronization with the PMAP before doing a non-LAST
+	 * pass (including the EARLY part of a LAST call).  This should let
+	 * us measure the impact of lazily synchronizing with the PMAP
+	 * capdirty bits.
+	 *
+	 * This may also be useful if one were to do intermediate (i.e.,
+	 * neither opening nor closing) passes, but at present we do not.
+	 *
+	 * Meaningless if CAPREVOKE_LAST_NO_EARLY also set.
+	 */
+#define CAPREVOKE_EARLY_SYNC	0x040
+
+	/*
 	 * Some flags indicate that we are to engage in a blocking
 	 * capability revocation sweep on a subset of the entire address
 	 * space.  If any of these are set, we bypass the above state

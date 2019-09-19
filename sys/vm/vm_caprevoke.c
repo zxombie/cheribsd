@@ -521,16 +521,8 @@ vm_caprevoke(const struct vm_caprevoke_cookie *crc, int flags)
 	if(map->busy)
 		vm_map_wait_busy(map);
 
-	if (flags & VM_CAPREVOKE_LAST_INIT) {
-		/*
-		 * The world is thread-singled; now is a great time to go
-		 * flush out all the MD capdirty bits to the MI layer.
-		 *
-		 * XXX Do we really want to do this only in LAST_INIT?
-		 * Should we have a separate flag to optionally do this for
-		 * incremental passes or something?  The world might not be
-		 * single-threaded for those, but maybe that's OK?
-		 */
+	if (flags & VM_CAPREVOKE_PMAP_SYNC) {
+		/* Flush out all the MD capdirty bits to the MI layer. */
 		pmap_sync_capdirty(map->pmap);
 	}
 

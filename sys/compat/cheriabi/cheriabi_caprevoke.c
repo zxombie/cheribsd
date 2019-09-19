@@ -352,8 +352,11 @@ fast_out:
 	/* Walk the VM unless told not to */
 	if ((uap->flags & CAPREVOKE_LAST_NO_EARLY) == 0) {
 		res = vm_caprevoke(&vmcrc,
+			/* Userspace can ask us to avoid an IPI here */
+		   (((uap->flags & CAPREVOKE_EARLY_SYNC) != 0)
+			? 0 : VM_CAPREVOKE_PMAP_SYNC)
 			/* If not first pass, only recently capdirty pages */
-		   ((entryst == CAPREVST_INIT_DONE)
+		   | ((entryst == CAPREVST_INIT_DONE)
 			? VM_CAPREVOKE_INCREMENTAL : 0));
 
 		if (res == KERN_SUCCESS) {
@@ -426,6 +429,7 @@ fast_out:
 			((entryst == CAPREVST_INIT_DONE)
 				? VM_CAPREVOKE_INCREMENTAL : 0)
 			| VM_CAPREVOKE_LAST_INIT
+			| VM_CAPREVOKE_PMAP_SYNC
 			| (((uap->flags & CAPREVOKE_LAST_NO_LATE) != 0)
 				? VM_CAPREVOKE_LAST_FINI : 0));
 
