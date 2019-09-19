@@ -72,14 +72,14 @@ enum vm_cro_visit {
  */
 static int
 vm_caprevoke_visit_rw(const struct vm_caprevoke_cookie *crc, int flags,
-		      vm_object_t obj, vm_page_t m)
+		      vm_page_t m)
 {
 	int hascaps;
 	CAPREVOKE_STATS_FOR(crst, crc);
 
 	if (!vm_page_tryxbusy(m))
 		return VM_CAPREVOKE_VIS_BUSY;
-	VM_OBJECT_WUNLOCK(obj);
+	VM_OBJECT_WUNLOCK(m->object);
 
 retry:
 	CAPREVOKE_STATS_BUMP(crst, pages_scan_rw);
@@ -95,7 +95,7 @@ retry:
 		vm_page_capdirty(m);
 	}
 
-	VM_OBJECT_WLOCK(obj);
+	VM_OBJECT_WLOCK(m->object);
 	vm_page_xunbusy(m);
 
 	/*
@@ -121,14 +121,14 @@ retry:
  */
 static int
 vm_caprevoke_visit_ro(const struct vm_caprevoke_cookie *crc, int flags,
-		      vm_object_t obj, vm_page_t m)
+		      vm_page_t m)
 {
 	CAPREVOKE_STATS_FOR(crst, crc);
 	int hascaps;
 
 	if (!vm_page_tryxbusy(m))
 		return VM_CAPREVOKE_VIS_BUSY;
-	VM_OBJECT_WUNLOCK(obj);
+	VM_OBJECT_WUNLOCK(m->object);
 
 	CAPREVOKE_STATS_BUMP(crst, pages_scan_ro);
 	hascaps = vm_caprevoke_page_ro(crc, m);
@@ -140,7 +140,7 @@ vm_caprevoke_visit_ro(const struct vm_caprevoke_cookie *crc, int flags,
 			" hc=%x m=%p, m->of=%x, m->af=%x",
 			hascaps, m, m->oflags, m->aflags));
 
-	VM_OBJECT_WLOCK(obj);
+	VM_OBJECT_WLOCK(m->object);
 	vm_page_xunbusy(m);
 
 	/*
@@ -215,6 +215,10 @@ vm_caprevoke_object_at(const struct vm_caprevoke_cookie *crc, int flags,
 					(entry->end - addr) >> PAGE_SHIFT);
 				*ooff = lastoff;
 			} else {
+
+				KASSERT(obj_next_pg->object == obj,
+					("Fast find page in bad object?"));
+
 				*ooff = IDX_TO_OFF(obj_next_pg->pindex);
 				CAPREVOKE_STATS_INC(crst, pages_skip_fast,
 					obj_next_pg->pindex - ipi);
@@ -255,9 +259,13 @@ vm_caprevoke_object_at(const struct vm_caprevoke_cookie *crc, int flags,
 			return VM_CAPREVOKE_AT_TICK;
 		}
 
-		VM_OBJECT_WLOCK(obj);
+		VM_OBJECT_WLOCK(m->object);
 		vm_caprevoke_unwire_in_situ(m);
+	} else {
+		KASSERT(m->object == obj, ("Page lookup bad object?"));
 	}
+
+	VM_OBJECT_ASSERT_WLOCKED(m->object);
 
 	if (pmap_page_is_write_mapped(m)) {
 		if (!vm_caprevoke_should_visit_page(m, flags)) {
@@ -272,14 +280,22 @@ vm_caprevoke_object_at(const struct vm_caprevoke_cookie *crc, int flags,
 	if (!vm_caprevoke_should_visit_page(m, flags)) {
 		*ooff = ioff + pagesizes[m->psind];
 		CAPREVOKE_STATS_BUMP(crst, pages_skip);
+		if (m->object != obj) {
+			VM_OBJECT_WUNLOCK(m->object);
+			VM_OBJECT_WLOCK(obj);
+		}
 		return VM_CAPREVOKE_AT_OK;
 	}
 
-	switch(vm_caprevoke_visit_ro(crc, flags, obj, m))
+	switch(vm_caprevoke_visit_ro(crc, flags, m))
 	{
 	case VM_CAPREVOKE_VIS_DONE:
 		/* We were able to conclude that the page was clean */
 		*ooff = ioff + pagesizes[m->psind];
+		if (m->object != obj) {
+			VM_OBJECT_WUNLOCK(m->object);
+			VM_OBJECT_WLOCK(obj);
+		}
 		return VM_CAPREVOKE_AT_OK;
 	case VM_CAPREVOKE_VIS_BUSY:
 		/*
@@ -288,7 +304,10 @@ vm_caprevoke_object_at(const struct vm_caprevoke_cookie *crc, int flags,
 		 * object lock to unbusy.  So handle this like the
 		 * map stepping forward.
 		 */
-		VM_OBJECT_WUNLOCK(obj);
+		if (m->object != obj) {
+			VM_OBJECT_WUNLOCK(m->object);
+		}
+		VM_OBJECT_ASSERT_UNLOCKED(obj);
 		return VM_CAPREVOKE_AT_TICK;
 	case VM_CAPREVOKE_VIS_DIRTY:
 		break;
@@ -303,27 +322,31 @@ vm_caprevoke_object_at(const struct vm_caprevoke_cookie *crc, int flags,
 
 	vm_offset_t addr = ioff - entry->offset + entry->start;
 
-	VM_OBJECT_WUNLOCK(obj);
+	VM_OBJECT_WUNLOCK(m->object);
 	vm_map_unlock_read(map);
 	res = vm_fault_hold(map, addr, VM_PROT_WRITE, VM_FAULT_NORMAL, &m);
 	vm_map_lock_read(map);
 	if (res != KERN_SUCCESS) {
 		*vmres = res;
+		VM_OBJECT_ASSERT_UNLOCKED(obj);
 		return VM_CAPREVOKE_AT_VMERR;
 	}
 	if (last_timestamp != map->timestamp) {
 		vm_page_lock(m);
 		vm_page_unwire(m, PQ_ACTIVE);
 		vm_page_unlock(m);
+		VM_OBJECT_ASSERT_UNLOCKED(obj);
 		return VM_CAPREVOKE_AT_TICK;
 	}
 
-	VM_OBJECT_WLOCK(obj);
+	KASSERT(m->object == obj, ("Bad page object after FAULT WRITE"));
+
+	VM_OBJECT_WLOCK(m->object);
 	vm_caprevoke_unwire_in_situ(m);
 
 visit_rw:
 	vm_page_aflag_clear(m, PGA_CAPSTORED);
-	switch(vm_caprevoke_visit_rw(crc, flags, obj, m))
+	switch(vm_caprevoke_visit_rw(crc, flags, m))
 	{
 	case VM_CAPREVOKE_VIS_DONE:
 visit_rw_ok:
@@ -348,9 +371,14 @@ visit_rw_ok:
 		}
 
 		*ooff = ioff + pagesizes[m->psind];
+		if (m->object != obj) {
+			VM_OBJECT_WUNLOCK(m->object);
+			VM_OBJECT_WLOCK(obj);
+		}
 		return VM_CAPREVOKE_AT_OK;
 	case VM_CAPREVOKE_VIS_BUSY:
-		VM_OBJECT_WUNLOCK(obj);
+		VM_OBJECT_WUNLOCK(m->object);
+		VM_OBJECT_ASSERT_UNLOCKED(obj);
 		return VM_CAPREVOKE_AT_TICK;
 	default:
 		panic("bad result from vm_caprevoke_visit_rw");
