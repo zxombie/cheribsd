@@ -138,6 +138,7 @@ static int vm_map_zinit(void *mem, int ize, int flags);
 static void _vm_map_init(vm_map_t map, pmap_t pmap, vm_offset_t min,
     vm_offset_t max);
 static void vm_map_entry_deallocate(vm_map_entry_t entry, boolean_t system_map);
+static void vm_map_entry_delete(vm_map_t map, vm_map_entry_t entry);
 static void vm_map_entry_dispose(vm_map_t map, vm_map_entry_t entry);
 static void vm_map_entry_unwire(vm_map_t map, vm_map_entry_t entry);
 static int vm_map_growstack(vm_map_t map, vm_offset_t addr,
@@ -153,6 +154,7 @@ static int vm_map_stack_locked(vm_map_t map, vm_offset_t addrbos,
     int cow);
 static void vm_map_wire_entry_failure(vm_map_t map, vm_map_entry_t entry,
     vm_offset_t failed_addr);
+static vm_map_entry_t vm_map_entry_create(vm_map_t map);
 
 #define	ENTRY_CHARGED(e) ((e)->cred != NULL || \
     ((e)->object.vm_object != NULL && (e)->object.vm_object->cred != NULL && \
@@ -410,6 +412,81 @@ vmspace_exitfree(struct proc *p)
 	PROC_VMSPACE_UNLOCK(p);
 	KASSERT(vm == &vmspace0, ("vmspace_exitfree: wrong vmspace"));
 	vmspace_free(vm);
+}
+
+static int coexecve_cleanup_margin_up = 0x10000;
+SYSCTL_INT(_debug, OID_AUTO, coexecve_cleanup_margin_up, CTLFLAG_RWTUN,
+    &coexecve_cleanup_margin_up, 0,
+    "Maximum hole size for segments growing up when cleaning up after colocated processes");
+static int coexecve_cleanup_margin_down = MAXSSIZ;
+SYSCTL_INT(_debug, OID_AUTO, coexecve_cleanup_margin_down, CTLFLAG_RWTUN,
+    &coexecve_cleanup_margin_down, 0,
+    "Maximum hole size for segments growing down when cleaning up after colocated processes");
+
+static void
+vm_map_entry_abandon(vm_map_t map, vm_map_entry_t old_entry)
+{
+	vm_map_entry_t entry, prev, next;
+	vm_offset_t start, end;
+	boolean_t found, grown_down;
+	int rv;
+
+	prev = old_entry->prev;
+	next = old_entry->next;
+	start = old_entry->start;
+	end = old_entry->end;
+	grown_down = old_entry->eflags & MAP_ENTRY_GROWS_DOWN;
+	vm_map_entry_delete(map, old_entry);
+
+	/*
+	 * Try to cover the "holes" between abandoned entries, so that
+	 * vm_map_simplify_entry() can coalesce them.  Use much larger
+	 * threshold for stacks.
+	 */
+	if (prev != &map->header && prev->object.vm_object == NULL &&
+	    prev->protection == PROT_NONE &&
+	    start > prev->end && start - prev->end <=
+	    ((grown_down != 0) ?
+	    coexecve_cleanup_margin_down : coexecve_cleanup_margin_up)) {
+		start = prev->end;
+	}
+
+	if (next != &map->header && next->object.vm_object == NULL &&
+	    next->protection == PROT_NONE &&
+	    end < next->start && next->start - end <=
+	    (((next->eflags & MAP_ENTRY_GROWS_DOWN) != 0) ?
+	    coexecve_cleanup_margin_down : coexecve_cleanup_margin_up)) {
+		end = next->start;
+	}
+
+	rv = vm_map_insert(map, NULL, 0, start, end,
+	    PROT_NONE, PROT_NONE, MAP_NOFAULT | MAP_DISABLE_SYNCER | MAP_DISABLE_COREDUMP);
+	KASSERT(rv == KERN_SUCCESS,
+	    ("%s: vm_map_insert() failed with error %d\n", __func__, rv));
+
+	found = vm_map_lookup_entry(map, start, &entry);
+	KASSERT(found == TRUE,
+	    ("%s: vm_map_insert() returned false\n", __func__));
+
+	KASSERT(entry->protection == PROT_NONE,
+	    ("%s: protection %d\n", __func__, entry->protection));
+	KASSERT(entry->max_protection == PROT_NONE,
+	    ("%s: max_protection %d\n", __func__, entry->max_protection));
+	KASSERT(entry->inheritance == VM_INHERIT_DEFAULT,
+	    ("%s: inheritance %d\n", __func__, entry->inheritance));
+	KASSERT(entry->wired_count == 0,
+	    ("%s: wired_count %d\n", __func__, entry->wired_count));
+	KASSERT(entry->cred == NULL,
+	    ("%s: cred %p\n", __func__, entry->cred));
+
+	/*
+	 * Preserve this particular flag for the purpose of future coalescing
+	 * by another vm_map_entry_abandon() run.
+	 */
+	if (grown_down)
+		entry->eflags |= MAP_ENTRY_GROWS_DOWN;
+
+	vm_map_simplify_entry(map, entry);
 }
 
 void
@@ -2089,10 +2166,16 @@ static bool
 vm_map_mergeable_neighbors(vm_map_entry_t prev, vm_map_entry_t entry)
 {
 
+#ifdef notyet
 	KASSERT((prev->eflags & MAP_ENTRY_NOMERGE_MASK) == 0 ||
 	    (entry->eflags & MAP_ENTRY_NOMERGE_MASK) == 0,
 	    ("vm_map_mergeable_neighbors: neither %p nor %p are mergeable",
 	    prev, entry));
+#else
+	if ((prev->eflags & MAP_ENTRY_NOMERGE_MASK) != 0 &&
+	    (entry->eflags & MAP_ENTRY_NOMERGE_MASK) != 0)
+	    return (false);
+#endif
 	return (prev->end == entry->start &&
 	    prev->object.vm_object == entry->object.vm_object &&
 	    (prev->object.vm_object == NULL ||
@@ -2143,8 +2226,15 @@ vm_map_simplify_entry(vm_map_t map, vm_map_entry_t entry)
 {
 	vm_map_entry_t next, prev;
 
-	if ((entry->eflags & MAP_ENTRY_NOMERGE_MASK) != 0)
+	if ((entry->eflags & (MAP_ENTRY_GROWS_UP |
+	    MAP_ENTRY_IN_TRANSITION | MAP_ENTRY_IS_SUB_MAP)) != 0)
 		return;
+
+	if ((entry->eflags & MAP_ENTRY_GROWS_DOWN) != 0 &&
+           (entry->object.vm_object != NULL ||
+	    entry->protection != PROT_NONE))
+		return;
+
 	prev = entry->prev;
 	if (vm_map_mergeable_neighbors(prev, entry)) {
 		vm_map_entry_unlink(map, prev, UNLINK_MERGE_NEXT);
@@ -3706,8 +3796,8 @@ vm_map_entry_delete(vm_map_t map, vm_map_entry_t entry)
  *	Deallocates the given address range from the target
  *	map.
  */
-int
-vm_map_delete(vm_map_t map, vm_offset_t start, vm_offset_t end)
+static int
+_vm_map_delete(vm_map_t map, vm_offset_t start, vm_offset_t end, bool abandon)
 {
 	vm_map_entry_t entry;
 	vm_map_entry_t first_entry;
@@ -3797,12 +3887,28 @@ vm_map_delete(vm_map_t map, vm_offset_t start, vm_offset_t end)
 		 * will be set in the wrong object!)
 		 */
 		vm_map_log("remove", entry);
-		vm_map_entry_delete(map, entry);
+		if (abandon)
+			vm_map_entry_abandon(map, entry);
+		else
+			vm_map_entry_delete(map, entry);
 		entry = next;
 	}
 	return (KERN_SUCCESS);
 }
 
+int
+vm_map_abandon_and_delete(vm_map_t map, vm_offset_t start, vm_offset_t end)
+{
+
+	return (_vm_map_delete(map, start, end, true));
+}
+
+int
+vm_map_delete(vm_map_t map, vm_offset_t start, vm_offset_t end)
+{
+
+	return (_vm_map_delete(map, start, end, false));
+}
 /*
  *	vm_map_remove:
  *
