@@ -3793,16 +3793,13 @@ pmap_sync_capdirty(pmap_t pmap)
 
 				pde = pmap_pde(pmap, pv->pv_va);
 				KASSERT(pde != NULL && *pde != 0,
-				    ("pmap_remove_pages: pde"));
+				    ("pmap_sync_capdirty: pde"));
 				pte = pmap_pde_to_pte(pde, pv->pv_va);
 				if (!pte_test(pte, PTE_VALID))
-					panic("pmap_remove_pages: bad pte");
+					panic("pmap_sync_capdirty: bad pte");
 				tpte = *pte;
 
 				if (pte_test(&tpte, PTE_MANAGED) == 0)
-					continue;
-
-				if (pte_test(&tpte, PTE_RO) == 1)
 					continue;
 
 				if (pte_test(&tpte, PTE_SC) == 0) {
