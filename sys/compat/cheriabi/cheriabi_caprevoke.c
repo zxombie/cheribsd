@@ -354,7 +354,7 @@ fast_out:
 		res = vm_caprevoke(&vmcrc,
 			/* Userspace can ask us to avoid an IPI here */
 		   (((uap->flags & CAPREVOKE_EARLY_SYNC) != 0)
-			? 0 : VM_CAPREVOKE_PMAP_SYNC)
+			? VM_CAPREVOKE_PMAP_SYNC : 0)
 			/* If not first pass, only recently capdirty pages */
 		   | ((entryst == CAPREVST_INIT_DONE)
 			? VM_CAPREVOKE_INCREMENTAL : 0));
