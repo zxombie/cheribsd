@@ -273,8 +273,16 @@ vm_caprevoke_object_at(const struct vm_caprevoke_cookie *crc, int flags,
 			goto visit_rw_ok;
 		}
 
-		/* The page is writable; just go do the revocation in place */
-		goto visit_rw;
+		if (m->object == obj) {
+			/*
+			 * XXX I don't quite understand how this is
+			 * possible, but something seems fishy about
+			 * this situation.  Just go force a RW fault
+			 * to copy up the page
+			 */
+			goto visit_rw;
+		}
+
 	}
 
 	if (!vm_caprevoke_should_visit_page(m, flags)) {
