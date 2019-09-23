@@ -37,11 +37,13 @@ __FBSDID("$FreeBSD$");
 #include <sys/systm.h>
 #include <sys/kernel.h>
 #include <sys/unistd.h>
+#include <sys/proc.h>
 #include <sys/caprevoke.h>
 
 #include <machine/_inttypes.h>
 #include <cheri/cheri.h>
 #include <cheri/cheric.h>
+#include <machine/pcb.h>
 
 #include <vm/vm.h>
 #include <vm/vm_extern.h>
@@ -52,6 +54,30 @@ __FBSDID("$FreeBSD$");
 #include <vm/vm_page.h>
 #include <vm/vm_param.h>
 #include <vm/vm_caprevoke.h>
+
+/*
+ * Here's a wildly dangerous thing to do: we know the shadow is inside a
+ * completely valid map... so even if this faults, the usual ZFOD handling
+ * will kick in.
+ *
+ * We can therefore install this somewhat dubious function as the fault
+ * handler before we sweep a page, which we do physically, so that we can
+ * access the virtual pages of the shadow bitmap.  YIKES!
+ *
+ * Why do this?  Because it beats installing and uninstalling the
+ * ->pcb_onfault for every capability we find in the page.
+ *
+ * Why only for each page?  Because a large amount of kernel code runs
+ * between each page scanned and while, in principle, none of that should be
+ * accessing user maps... I would much rather a performance hit than
+ * accidentally leave an onfault handler registered when we went back to
+ * userland!
+ */
+static void
+vm_caprevoke_tlb_fault(void)
+{
+	panic(__FUNCTION__);
+}
 
 static inline int
 vm_test_caprevoke_mem(const struct vm_caprevoke_cookie *crc,
@@ -80,7 +106,17 @@ vm_test_caprevoke_mem(const struct vm_caprevoke_cookie *crc,
 			+ (VM_CAPREVOKE_BM_MEM_MAP - VM_CAPREVOKE_BM_BASE)
 			+ (va / VM_CAPREVOKE_GSZ_MEM_MAP / 8);
 
-		bmbits = fubyte_c(bmloc);
+		/*
+		 * Load it (see the comments on vm_caprevoke_tlb_fault above
+		 * before *you* panic, dear reader.
+		 */
+
+		bmbits = *bmloc;
+
+		/* Fast path: often these are all zeros */
+
+		if (bmbits == 0)
+			return 0;
 
 		if (bmbits & (1 << ((va / VM_CAPREVOKE_GSZ_MEM_MAP) % 8))) {
 			return 1;
@@ -100,7 +136,10 @@ vm_test_caprevoke_mem(const struct vm_caprevoke_cookie *crc,
 			+ (VM_CAPREVOKE_BM_MEM_NOMAP - VM_CAPREVOKE_BM_BASE)
 			+ (va / VM_CAPREVOKE_GSZ_MEM_NOMAP / 8);
 
-		bmbits = fubyte_c(bmloc);
+		bmbits = *bmloc;
+
+		if (bmbits == 0)
+			return 0;
 
 		if (bmbits & (1 << ((va / VM_CAPREVOKE_GSZ_MEM_NOMAP) % 8))) {
 			return 1;
@@ -243,6 +282,8 @@ vm_caprevoke_page_iter(const struct vm_caprevoke_cookie *crc,
 {
 	int res = 0;
 
+	curthread->td_pcb->pcb_onfault = vm_caprevoke_tlb_fault;
+
 #ifdef CHERI_CAPREVOKE_CLOADTAGS
 	for( ; cheri_getaddress(mvu) < mve; mvu += cloadtags_stride ) {
 		void * __capability * __capability mvt = mvu;
@@ -269,6 +310,8 @@ vm_caprevoke_page_iter(const struct vm_caprevoke_cookie *crc,
 		}
 	}
 #endif
+
+	curthread->td_pcb->pcb_onfault = NULL;
 
 	return res;
 }
