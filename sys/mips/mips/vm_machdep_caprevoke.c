@@ -149,16 +149,33 @@ vm_test_caprevoke_mem(const struct vm_caprevoke_cookie *crc,
 	return 0;
 }
 
-int
+inline int
 vm_test_caprevoke(const struct vm_caprevoke_cookie *crc,
 		  const void * __capability cut)
 {
 	int res = 0;
 	int perms = cheri_getperm(cut);
 
-	if ((perms & (CHERI_PERMS_HWALL_MEMORY | CHERI_PERM_CHERIABI_VMMAP))
-	    != 0) {
-		res |= vm_test_caprevoke_mem(crc, cut);
+	/* The inliner should do great things with these pre-flight tests */
+
+	if (crc->flags & VM_CAPREVOKE_CF_NO_COARSE) {
+		/* No coarse bits means VMMAP is immune to revocation */
+
+		if (((perms & CHERI_PERM_CHERIABI_VMMAP) == 0)
+		    && ((perms & CHERI_PERMS_HWALL_MEMORY) != 0)) {
+			res |= vm_test_caprevoke_mem(crc, cut);
+		}
+
+	} else {
+		/*
+		 * On the other hand, if there are coarse bits, then
+		 * do the full logic for memory caps.
+		 */
+
+		if ((perms & (CHERI_PERMS_HWALL_MEMORY
+			     | CHERI_PERM_CHERIABI_VMMAP)) != 0) {
+			res |= vm_test_caprevoke_mem(crc, cut);
+		}
 	}
 
 	// TODO: if ((perms & CHERI_PERMS_HWALL_OTYPE) != 0)
