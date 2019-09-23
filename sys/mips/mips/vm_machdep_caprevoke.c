@@ -190,12 +190,12 @@ vm_test_caprevoke(const struct vm_caprevoke_cookie *crc,
  * don't have a LLC instruction, just a CLLC one.
  */
 static int
-vm_do_caprevoke(const struct vm_caprevoke_cookie *crc,
+vm_do_caprevoke(int *res,
+		const struct vm_caprevoke_cookie *crc,
 		void * __capability * __capability cutp,
 		void * __capability cut)
 {
 	CAPREVOKE_STATS_FOR(crst, crc);
-	int res = 0;
 
 	KASSERT(cheri_gettag(cut), ("untagged in vm_do_caprevoke"));
 
@@ -241,20 +241,20 @@ vm_do_caprevoke(const struct vm_caprevoke_cookie *crc,
 			CAPREVOKE_STATS_BUMP(crst, caps_cleared);
 			/* Don't count a revoked cap as HASCAPS */
 		} else {
-			res = VM_CAPREVOKE_PAGE_DIRTY
+			*res |= VM_CAPREVOKE_PAGE_DIRTY
 				| VM_CAPREVOKE_PAGE_HASCAPS ;
 		}
 	} else {
 		/* Again, don't count a revoked cap as HASCAPS */
 		if ((cheri_getperm(cut) != 0) || (cheri_getsealed(cut) != 0)) {
 			CAPREVOKE_STATS_BUMP(crst, caps_found);
-			res = VM_CAPREVOKE_PAGE_HASCAPS;
+			*res |= VM_CAPREVOKE_PAGE_HASCAPS;
 		} else {
 			CAPREVOKE_STATS_BUMP(crst, caps_found_revoked);
 		}
 	}
 
-	return res;
+	return 0;
 }
 
 #ifdef CHERI_CAPREVOKE_CLOADTAGS
@@ -291,7 +291,7 @@ SYSINIT(cloadtags_stride, SI_SUB_VM, SI_ORDER_ANY,
 
 static inline int
 vm_caprevoke_page_iter(const struct vm_caprevoke_cookie *crc,
-		       int (*cb)(const struct vm_caprevoke_cookie *,
+		       int (*cb)(int *, const struct vm_caprevoke_cookie *,
 				 void * __capability * __capability,
 				 void * __capability),
 		       void * __capability * __capability mvu,
@@ -312,8 +312,7 @@ vm_caprevoke_page_iter(const struct vm_caprevoke_cookie *crc,
 			if (!(tags & 1))
 				continue;
 
-			res |= cb(crc, mvt, *mvt);
-			if (res & VM_CAPREVOKE_PAGE_EARLY_OUT)
+			if (cb(&res, crc, mvt, *mvt))
 				return res;
 		}
 	}
@@ -321,8 +320,7 @@ vm_caprevoke_page_iter(const struct vm_caprevoke_cookie *crc,
 	for( ; cheri_getaddress(mvu) < mve; mvu++) {
 		void * __capability cut = *mvu;
 		if (cheri_gettag(cut)) {
-			res |= cb(crc, mvu, cut);
-			if (res & VM_CAPREVOKE_PAGE_EARLY_OUT)
+			if (cb(&res, crc, mvt, *mvt))
 				return res;
 		}
 	}
@@ -372,18 +370,19 @@ vm_caprevoke_page(const struct vm_caprevoke_cookie *crc, vm_page_t m)
 }
 
 static inline int
-vm_caprevoke_page_ro_adapt(const struct vm_caprevoke_cookie *vmcrc,
+vm_caprevoke_page_ro_adapt(int *res,
+			   const struct vm_caprevoke_cookie *vmcrc,
 			   void * __capability * __capability cutp,
 			   void * __capability cut)
 {
 	(void)cutp;
 
-	int res = vm_test_caprevoke(vmcrc, cut);
+	if (vm_test_caprevoke(vmcrc, cut)) {
+		*res = VM_CAPREVOKE_PAGE_DIRTY;
+		return 1;
+	}
 
-	if (res & VM_CAPREVOKE_PAGE_DIRTY)
-		return res | VM_CAPREVOKE_PAGE_EARLY_OUT;
-
-	return res;
+	return 0;
 }
 
 /*
