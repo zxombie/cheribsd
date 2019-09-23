@@ -299,10 +299,13 @@ vm_caprevoke_page_iter(const struct vm_caprevoke_cookie *crc,
 {
 	int res = 0;
 
+	/* Load once up front, which is almost as good as const */
+	uint8_t _cloadtags_stride = cloadtags_stride;
+
 	curthread->td_pcb->pcb_onfault = vm_caprevoke_tlb_fault;
 
 #ifdef CHERI_CAPREVOKE_CLOADTAGS
-	for( ; cheri_getaddress(mvu) < mve; mvu += cloadtags_stride ) {
+	for( ; cheri_getaddress(mvu) < mve; mvu += _cloadtags_stride ) {
 		void * __capability * __capability mvt = mvu;
 		uint64_t tags;
 
