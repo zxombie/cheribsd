@@ -149,9 +149,9 @@ vm_test_caprevoke_mem(const struct vm_caprevoke_cookie *crc,
 	return 0;
 }
 
-inline int
-vm_test_caprevoke(const struct vm_caprevoke_cookie *crc,
-		  const void * __capability cut)
+static inline int
+vm_test_caprevoke_int(const struct vm_caprevoke_cookie *crc,
+		      const void * __capability cut)
 {
 	int res = 0;
 	int perms = cheri_getperm(cut);
@@ -199,7 +199,7 @@ vm_do_caprevoke(int *res,
 
 	KASSERT(cheri_gettag(cut), ("untagged in vm_do_caprevoke"));
 
-	if (vm_test_caprevoke(crc, cut)) {
+	if (vm_test_caprevoke_int(crc, cut)) {
 		void * __capability cscratch;
 		int ok;
 
@@ -335,6 +335,19 @@ out:
 }
 
 int
+vm_test_caprevoke(const struct vm_caprevoke_cookie *crc,
+		      const void * __capability cut)
+{
+	int res;
+
+	curthread->td_pcb->pcb_onfault = vm_caprevoke_tlb_fault;
+	res = vm_test_caprevoke_int(crc, cut);
+	curthread->td_pcb->pcb_onfault = NULL;
+
+	return res;
+}
+
+int
 vm_caprevoke_page(const struct vm_caprevoke_cookie *crc, vm_page_t m)
 {
 #ifdef CHERI_CAPREVOKE_STATS
@@ -380,7 +393,7 @@ vm_caprevoke_page_ro_adapt(int *res,
 {
 	(void)cutp;
 
-	if (vm_test_caprevoke(vmcrc, cut)) {
+	if (vm_test_caprevoke_int(vmcrc, cut)) {
 		*res = VM_CAPREVOKE_PAGE_DIRTY;
 		return 1;
 	}
