@@ -497,9 +497,9 @@ vm_caprevoke_shadow_cap(int sel, vm_offset_t base, vm_offset_t size, int pmask)
 		shadow_size = size / VM_CAPREVOKE_GSZ_MEM_NOMAP / 8;
 
 		return cheri_capability_build_user_data(
-			pmask & (CHERI_PERM_LOAD | CHERI_PERM_STORE)
-				| CHERI_PERM_GLOBAL,
-			shadow_base, shadow_size, 0);
+		    (pmask & (CHERI_PERM_LOAD | CHERI_PERM_STORE)) |
+			CHERI_PERM_GLOBAL,
+		    shadow_base, shadow_size, 0);
 	}	
 	case CAPREVOKE_SHADOW_OTYPE: {
 		vm_offset_t shadow_base, shadow_size;
