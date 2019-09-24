@@ -316,7 +316,7 @@ vm_caprevoke_page_iter(const struct vm_caprevoke_cookie *crc,
 				continue;
 
 			if (cb(&res, crc, mvt, *mvt))
-				return res;
+				goto out;
 		}
 	}
 #else
@@ -324,13 +324,13 @@ vm_caprevoke_page_iter(const struct vm_caprevoke_cookie *crc,
 		void * __capability cut = *mvu;
 		if (cheri_gettag(cut)) {
 			if (cb(&res, crc, mvt, *mvt))
-				return res;
+				goto out;
 		}
 	}
 #endif
 
+out:
 	curthread->td_pcb->pcb_onfault = NULL;
-
 	return res;
 }
 
