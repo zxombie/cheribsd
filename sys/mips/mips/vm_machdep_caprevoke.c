@@ -79,71 +79,61 @@ vm_caprevoke_tlb_fault(void)
 	panic(__FUNCTION__);
 }
 
+/* Check the coarse-grained MAP bitmap */
 static inline int
-vm_test_caprevoke_mem(const struct vm_caprevoke_cookie *crc,
-		      const void * __capability cut)
+vm_test_caprevoke_mem_map(const uint8_t * __capability crshadow,
+			  const void * __capability cut)
 {
-	/*
-	 * Find appropriate bitmap bits.  We use the base so that even if
-	 * the cursor is out of bounds, we find the true status of the
-	 * allocation under test.
-	 */
+	uint8_t bmbits;
+	const uint8_t * __capability bmloc;
 
 	vm_offset_t va = cheri_getbase(cut);
 
+	bmloc = crshadow
+		+ (VM_CAPREVOKE_BM_MEM_MAP - VM_CAPREVOKE_BM_BASE)
+		+ (va / VM_CAPREVOKE_GSZ_MEM_MAP / 8);
+
 	/*
-	 * All capabilities are checked against the coarse MAP bitmap, unless
-	 * we're instructed not to, as we might be if we know that there are
-	 * no bits set anywhere in that map.  Since this map is under the
-	 * kernel's control, this is a reasonable possibility.
+	 * Load it (see the comments on vm_caprevoke_tlb_fault above
+	 * before *you* panic, dear reader.
 	 */
-	if ((crc->flags & VM_CAPREVOKE_CF_NO_COARSE) == 0)
-	{
-		uint8_t bmbits;
-		const uint8_t * __capability bmloc;
 
-		bmloc = crc->crshadow
-			+ (VM_CAPREVOKE_BM_MEM_MAP - VM_CAPREVOKE_BM_BASE)
-			+ (va / VM_CAPREVOKE_GSZ_MEM_MAP / 8);
+	bmbits = *bmloc;
 
-		/*
-		 * Load it (see the comments on vm_caprevoke_tlb_fault above
-		 * before *you* panic, dear reader.
-		 */
+	/* Fast path: often these are all zeros */
 
-		bmbits = *bmloc;
-
-		/* Fast path: often these are all zeros */
-
-		if (bmbits == 0)
-			return 0;
-
-		if (bmbits & (1 << ((va / VM_CAPREVOKE_GSZ_MEM_MAP) % 8))) {
-			return 1;
-		}
+	if (bmbits == 0) {
+		return 0;
 	}
 
-	if ((cheri_getperm(cut) & CHERI_PERM_CHERIABI_VMMAP) == 0) {
-		/*
-		 * This is a non-VMMAP-bearing capability.  Also check the
-		 * NOMAP bitmap
-		 */
+	if (bmbits & (1 << ((va / VM_CAPREVOKE_GSZ_MEM_MAP) % 8))) {
+		return 1;
+	}
 
-		uint8_t bmbits;
-		const uint8_t * __capability bmloc;
+	return 0;
+}
 
-		bmloc = crc->crshadow
-			+ (VM_CAPREVOKE_BM_MEM_NOMAP - VM_CAPREVOKE_BM_BASE)
-			+ (va / VM_CAPREVOKE_GSZ_MEM_NOMAP / 8);
+/* Check the fine-grained NOMAP bitmap */
+static inline int
+vm_test_caprevoke_mem_nomap(const uint8_t * __capability crshadow,
+			    const void * __capability cut)
+{
+	uint8_t bmbits;
+	const uint8_t * __capability bmloc;
 
-		bmbits = *bmloc;
+	vm_offset_t va = cheri_getbase(cut);
 
-		if (bmbits == 0)
-			return 0;
+	bmloc = crshadow
+		+ (VM_CAPREVOKE_BM_MEM_NOMAP - VM_CAPREVOKE_BM_BASE)
+		+ (va / VM_CAPREVOKE_GSZ_MEM_NOMAP / 8);
 
-		if (bmbits & (1 << ((va / VM_CAPREVOKE_GSZ_MEM_NOMAP) % 8))) {
-			return 1;
-		}
+	bmbits = *bmloc;
+
+	if (bmbits == 0)
+		return 0;
+
+	if (bmbits & (1 << ((va / VM_CAPREVOKE_GSZ_MEM_NOMAP) % 8))) {
+		return 1;
 	}
 
 	return 0;
@@ -156,14 +146,12 @@ vm_test_caprevoke_int(const struct vm_caprevoke_cookie *crc,
 	int res = 0;
 	int perms = cheri_getperm(cut);
 
-	/* The inliner should do great things with these pre-flight tests */
-
 	if (crc->flags & VM_CAPREVOKE_CF_NO_COARSE) {
 		/* No coarse bits means VMMAP is immune to revocation */
 
 		if (((perms & CHERI_PERM_CHERIABI_VMMAP) == 0)
 		    && ((perms & CHERI_PERMS_HWALL_MEMORY) != 0)) {
-			res |= vm_test_caprevoke_mem(crc, cut);
+			res |= vm_test_caprevoke_mem_nomap(crc->crshadow, cut);
 		}
 
 	} else {
@@ -174,7 +162,12 @@ vm_test_caprevoke_int(const struct vm_caprevoke_cookie *crc,
 
 		if ((perms & (CHERI_PERMS_HWALL_MEMORY
 			     | CHERI_PERM_CHERIABI_VMMAP)) != 0) {
-			res |= vm_test_caprevoke_mem(crc, cut);
+			res |= vm_test_caprevoke_mem_map(crc->crshadow, cut);
+
+			if ((perms & CHERI_PERM_CHERIABI_VMMAP) == 0) {
+				res |= vm_test_caprevoke_mem_nomap(
+					crc->crshadow, cut);
+			}
 		}
 	}
 
