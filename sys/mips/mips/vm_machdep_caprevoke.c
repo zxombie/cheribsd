@@ -303,6 +303,14 @@ vm_caprevoke_page_iter(const struct vm_caprevoke_cookie *crc,
 		uint64_t tags;
 
 		tags = __builtin_cheri_cap_load_tags(mvt);
+		if (tags != 0) {
+			/* We expect loads and no stores, thus hint 4 */
+			__asm__ __volatile__ (
+				"pref 4, 0(%[addr])\n\t"
+			  : /* no out */
+			  : [addr] "r" (cheri_getaddress(mvu))
+			  : /* no clobber */);
+		}
 
 		for(; tags != 0; (tags >>= 1), mvt += 1) {
 			if (!(tags & 1))
