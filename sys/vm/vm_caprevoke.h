@@ -83,7 +83,14 @@ struct vm_caprevoke_cookie {
 #ifdef CHERI_CAPREVOKE_STATS
 	struct caprevoke_stats *stats;		/* Statistics */
 #endif
-	int flags;				/* VM_CAPREVOKE_CF_* */
+
+	/*
+	 * To support optimization as to which bitmap(s) we look at,
+	 * given revocation runs may use different predicates on
+	 * capabilities under test.
+	 */
+	int (*caprevoke_test_int)(const uint8_t * __capability shadow,
+				  const void * __capability cut);
 };
 
 int vm_caprevoke_cookie_init(struct vm_map * map,
@@ -107,17 +114,19 @@ int vm_caprevoke_one(const struct vm_caprevoke_cookie *, int, vm_offset_t);
 
 /***************************** KERNEL MD LAYER ******************************/
 
-/*
- * These are map-wide status flags, not to be confused with
- * capability-revocation state-machine flags, which evolve within the
- * lifetime of one cookie.
- */
-enum {
-  VM_CAPREVOKE_CF_NO_COARSE = 0x01,
-};
-
 int vm_caprevoke_test(const struct vm_caprevoke_cookie *,
 		      const void * __capability);
+
+
+enum {
+	/* If no coarse bits set, VMMAP-bearing caps are imune */
+	VM_CAPREVOKE_CF_NO_COARSE_MEM = 0x01,
+
+	/* If no otype bits set, Permit_Seal and _Unseal are imune */
+	VM_CAPREVOKE_CF_NO_OTYPES = 0x02,
+	VM_CAPREVOKE_CF_NO_CIDS   = 0x04,
+};
+void vm_caprevoke_set_test(struct vm_caprevoke_cookie *, int flags);
 
 /*  Shadow region installation into vm map */
 int vm_map_install_caprevoke_shadow (struct vm_map * map);

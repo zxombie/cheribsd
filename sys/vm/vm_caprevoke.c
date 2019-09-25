@@ -648,13 +648,17 @@ vm_caprevoke_cookie_init(vm_map_t map,
 
 	/*
 	 * XXX Right now, we know that there are no coarse-grain bits
-	 * getting set, since we don't do MPROT_QUARANTINE or anything of
-	 * that sort.  So we just always assert VM_CAPREVOKE_NO_COARSE.
+	 * getting set, nor otypes nor anything else, since we don't do
+	 * MPROT_QUARANTINE or anything of that sort.
+	 *
 	 * In the future, we should count the number of pages held in
 	 * MPROT_QUARANTINE or munmap()'s quarantine or other such to decide
-	 * whether to set this!
+	 * whether to set _NO_COARSE.  Similary for the others.
 	 */
-	crc->flags = VM_CAPREVOKE_CF_NO_COARSE;
+	vm_caprevoke_set_test(crc,
+		VM_CAPREVOKE_CF_NO_COARSE_MEM
+		| VM_CAPREVOKE_CF_NO_OTYPES
+		| VM_CAPREVOKE_CF_NO_CIDS);
 
 	/*
 	 * For foreign maps, we should take advantage of map->vm_caprev_sh
