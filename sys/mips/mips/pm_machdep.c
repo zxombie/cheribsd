@@ -725,7 +725,7 @@ caprevoke_td_frame(struct thread *td, const struct vm_caprevoke_cookie *crc)
 #define CAPREV_REG(r) \
 	do { if (cheri_gettag(r)) { \
 		CAPREVOKE_STATS_BUMP(crst, caps_found); \
-		if (vm_test_caprevoke(crc, r)) { \
+		if (vm_caprevoke_test(crc, r)) { \
 			r = cheri_revoke(r); \
 			CAPREVOKE_STATS_BUMP(crst, caps_cleared); \
 		} \

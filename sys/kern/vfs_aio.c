@@ -2759,7 +2759,7 @@ restart:
 		 * aio_sigevent.sigev_value.sival_ptr) we assume will be
 		 * scrubbed by userland.
 		 */
-		if (vm_test_caprevoke(crc, uc)) {
+		if (vm_caprevoke_test(crc, uc)) {
 			job->uaiocb.aio_sigevent.sigev_value.sival_ptr_c =
 				cheri_revoke(uc);
 		}
@@ -2770,11 +2770,11 @@ restart:
 		 * buffer itself is in the region being revoked or
 		 * the mysterious "kernelinfo" capability.
 		 */
-		if (   vm_test_caprevoke(crc, job->ujob)
-		    || vm_test_caprevoke(crc,
+		if (   vm_caprevoke_test(crc, job->ujob)
+		    || vm_caprevoke_test(crc,
 					 __DEQUALIFY_CAP(void * __capability,
 					 job->uaiocb.aio_buf))
-		    || vm_test_caprevoke(crc,
+		    || vm_caprevoke_test(crc,
 					 job->uaiocb._aiocb_private.kernelinfo)
 		   ) {
 			aio_cancel_job(p, ki, job);

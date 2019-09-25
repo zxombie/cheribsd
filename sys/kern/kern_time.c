@@ -1450,7 +1450,7 @@ ktimer_caprevoke(struct proc *p, const struct vm_caprevoke_cookie *crc)
 			continue;
 
 		CAPREVOKE_STATS_BUMP(crst, caps_found);
-		if (vm_test_caprevoke(crc, v)) {
+		if (vm_caprevoke_test(crc, v)) {
 			it->it_sigev.sigev_value.sival_ptr_c = cheri_revoke(v);
 			CAPREVOKE_STATS_BUMP(crst, caps_cleared);
 		}

@@ -81,7 +81,7 @@ vm_caprevoke_tlb_fault(void)
 
 /* Check the coarse-grained MAP bitmap */
 static inline int
-vm_test_caprevoke_mem_map(const uint8_t * __capability crshadow,
+vm_caprevoke_test_mem_map(const uint8_t * __capability crshadow,
 			  const void * __capability cut)
 {
 	uint8_t bmbits;
@@ -115,7 +115,7 @@ vm_test_caprevoke_mem_map(const uint8_t * __capability crshadow,
 
 /* Check the fine-grained NOMAP bitmap */
 static inline int
-vm_test_caprevoke_mem_nomap(const uint8_t * __capability crshadow,
+vm_caprevoke_test_mem_nomap(const uint8_t * __capability crshadow,
 			    const void * __capability cut)
 {
 	uint8_t bmbits;
@@ -139,8 +139,8 @@ vm_test_caprevoke_mem_nomap(const uint8_t * __capability crshadow,
 	return 0;
 }
 
-static inline int
-vm_test_caprevoke_int(const struct vm_caprevoke_cookie *crc,
+static int
+vm_caprevoke_test_int(const struct vm_caprevoke_cookie *crc,
 		      const void * __capability cut)
 {
 	int res = 0;
@@ -151,7 +151,7 @@ vm_test_caprevoke_int(const struct vm_caprevoke_cookie *crc,
 
 		if (((perms & CHERI_PERM_CHERIABI_VMMAP) == 0)
 		    && ((perms & CHERI_PERMS_HWALL_MEMORY) != 0)) {
-			res |= vm_test_caprevoke_mem_nomap(crc->crshadow, cut);
+			res |= vm_caprevoke_test_mem_nomap(crc->crshadow, cut);
 		}
 
 	} else {
@@ -162,10 +162,10 @@ vm_test_caprevoke_int(const struct vm_caprevoke_cookie *crc,
 
 		if ((perms & (CHERI_PERMS_HWALL_MEMORY
 			     | CHERI_PERM_CHERIABI_VMMAP)) != 0) {
-			res |= vm_test_caprevoke_mem_map(crc->crshadow, cut);
+			res |= vm_caprevoke_test_mem_map(crc->crshadow, cut);
 
 			if ((perms & CHERI_PERM_CHERIABI_VMMAP) == 0) {
-				res |= vm_test_caprevoke_mem_nomap(
+				res |= vm_caprevoke_test_mem_nomap(
 					crc->crshadow, cut);
 			}
 		}
@@ -192,7 +192,7 @@ vm_do_caprevoke(int *res,
 
 	KASSERT(cheri_gettag(cut), ("untagged in vm_do_caprevoke"));
 
-	if (vm_test_caprevoke_int(crc, cut)) {
+	if (vm_caprevoke_test_int(crc, cut)) {
 		void * __capability cscratch;
 		int ok;
 
@@ -328,13 +328,13 @@ out:
 }
 
 int
-vm_test_caprevoke(const struct vm_caprevoke_cookie *crc,
+vm_caprevoke_test(const struct vm_caprevoke_cookie *crc,
 		      const void * __capability cut)
 {
 	int res;
 
 	curthread->td_pcb->pcb_onfault = vm_caprevoke_tlb_fault;
-	res = vm_test_caprevoke_int(crc, cut);
+	res = vm_caprevoke_test_int(crc, cut);
 	curthread->td_pcb->pcb_onfault = NULL;
 
 	return res;
@@ -386,7 +386,7 @@ vm_caprevoke_page_ro_adapt(int *res,
 {
 	(void)cutp;
 
-	if (vm_test_caprevoke_int(vmcrc, cut)) {
+	if (vm_caprevoke_test_int(vmcrc, cut)) {
 		*res = VM_CAPREVOKE_PAGE_DIRTY;
 		return 1;
 	}

@@ -1837,7 +1837,7 @@ sigaltstack_caprevoke(struct thread *td, const struct vm_caprevoke_cookie *crc)
 
 	if (cheri_gettag(sp)) {
 		CAPREVOKE_STATS_BUMP(crst, caps_found);
-		if (vm_test_caprevoke(crc, sp)) {
+		if (vm_caprevoke_test(crc, sp)) {
 			CAPREVOKE_STATS_BUMP(crst, caps_cleared);
 			td->td_sigstk.ss_sp = cheri_revoke(sp);
 		}

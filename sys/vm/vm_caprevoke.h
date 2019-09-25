@@ -116,7 +116,7 @@ enum {
   VM_CAPREVOKE_CF_NO_COARSE = 0x01,
 };
 
-int vm_test_caprevoke(const struct vm_caprevoke_cookie *,
+int vm_caprevoke_test(const struct vm_caprevoke_cookie *,
 		      const void * __capability);
 
 /*  Shadow region installation into vm map */
