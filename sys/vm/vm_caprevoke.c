@@ -8,7 +8,6 @@ __FBSDID("$FreeBSD$");
 #include <sys/mutex.h>
 #include <sys/proc.h>
 #include <sys/rwlock.h>
-#include <sys/cheriabi.h>
 
 #include <vm/vm.h>
 #include <vm/vm_param.h>
