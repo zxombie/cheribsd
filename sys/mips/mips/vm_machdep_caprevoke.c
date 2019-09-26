@@ -79,100 +79,6 @@ vm_caprevoke_tlb_fault(void)
 	panic(__FUNCTION__);
 }
 
-/* Check the coarse-grained MAP bitmap */
-static inline int
-vm_caprevoke_test_mem_map(const uint8_t * __capability crshadow,
-			  const void * __capability cut)
-{
-	uint8_t bmbits;
-	const uint8_t * __capability bmloc;
-
-	vm_offset_t va = cheri_getbase(cut);
-
-	bmloc = crshadow
-		+ (VM_CAPREVOKE_BM_MEM_MAP - VM_CAPREVOKE_BM_BASE)
-		+ (va / VM_CAPREVOKE_GSZ_MEM_MAP / 8);
-
-	/*
-	 * Load it (see the comments on vm_caprevoke_tlb_fault above
-	 * before *you* panic, dear reader.
-	 */
-
-	bmbits = *bmloc;
-
-	/* Fast path: often these are all zeros */
-
-	if (bmbits == 0) {
-		return 0;
-	}
-
-	if (bmbits & (1 << ((va / VM_CAPREVOKE_GSZ_MEM_MAP) % 8))) {
-		return 1;
-	}
-
-	return 0;
-}
-
-/* Check the fine-grained NOMAP bitmap */
-static inline int
-vm_caprevoke_test_mem_nomap(const uint8_t * __capability crshadow,
-			    const void * __capability cut)
-{
-	uint8_t bmbits;
-	const uint8_t * __capability bmloc;
-
-	vm_offset_t va = cheri_getbase(cut);
-
-	bmloc = crshadow
-		+ (VM_CAPREVOKE_BM_MEM_NOMAP - VM_CAPREVOKE_BM_BASE)
-		+ (va / VM_CAPREVOKE_GSZ_MEM_NOMAP / 8);
-
-	bmbits = *bmloc;
-
-	if (bmbits == 0)
-		return 0;
-
-	if (bmbits & (1 << ((va / VM_CAPREVOKE_GSZ_MEM_NOMAP) % 8))) {
-		return 1;
-	}
-
-	return 0;
-}
-
-static int
-vm_caprevoke_test_just_mem(const uint8_t * __capability crshadow,
-		      const void * __capability cut)
-{
-	int res = 0;
-	int perms = cheri_getperm(cut);
-
-	if ((perms & (CHERI_PERMS_HWALL_MEMORY
-		     | CHERI_PERM_CHERIABI_VMMAP)) != 0) {
-		res |= vm_caprevoke_test_mem_map(crshadow, cut);
-
-		if ((perms & CHERI_PERM_CHERIABI_VMMAP) == 0) {
-			res |= vm_caprevoke_test_mem_nomap(crshadow, cut);
-		}
-	}
-	return res;
-}
-
-static int
-vm_caprevoke_test_just_mem_fine(const uint8_t * __capability crshadow,
-		      const void * __capability cut)
-{
-	int perms = cheri_getperm(cut);
-
-	if (((perms & CHERI_PERM_CHERIABI_VMMAP) == 0)
-	    && ((perms & CHERI_PERMS_HWALL_MEMORY) != 0)) {
-		return vm_caprevoke_test_mem_nomap(crshadow, cut);
-	}
-
-	return 0;
-}
-
-// TODO: if ((perms & CHERI_PERMS_HWALL_OTYPE) != 0)
-// TODO: if ((perms & CHERI_PERMS_HWALL_CID) != 0)
 
 /*
  * The Capability Under Test Pointer needs to be a capability because we
@@ -182,14 +88,14 @@ static int
 vm_do_caprevoke(int *res,
 		const struct vm_caprevoke_cookie *crc,
 		const uint8_t * __capability crshadow,
-		int (*ctp)(const uint8_t * __capability,
-			   const void * __capability),
+		vm_caprevoke_test_fn ctp,
 		void * __capability * __capability cutp,
 		void * __capability cut)
 {
+	int perms = cheri_getperm(cut);
 	CAPREVOKE_STATS_FOR(crst, crc);
 
-	if (cheri_gettag(cut) == 0 || cheri_getperm(cut) == 0) {
+	if (perms == 0) {
 		/* For revoked or permissionless caps, do nothing. */
 
 		/*
@@ -200,9 +106,12 @@ vm_do_caprevoke(int *res,
 		 */
 
 		CAPREVOKE_STATS_BUMP(crst, caps_found_revoked);
-	} else if (ctp(crshadow, cut)) {
+	} else if (ctp(crshadow, cut, perms)) {
 		void * __capability cscratch;
 		int ok;
+
+		if (cheri_gettag(cut) == 0)
+			return 0;
 
 		void * __capability cutr = cheri_revoke(cut);
 
@@ -247,6 +156,12 @@ vm_do_caprevoke(int *res,
 		}
 	} else {
 		CAPREVOKE_STATS_BUMP(crst, caps_found);
+
+		/*
+		 * Even though it might actually be un-tagged, that's a very
+		 * narrow race and this a very common case, so don't bother
+		 * testing.  We'll find it clear next time, maybe.
+		 */
 		*res |= VM_CAPREVOKE_PAGE_HASCAPS;
 	}
 
@@ -289,8 +204,7 @@ static inline int
 vm_caprevoke_page_iter(const struct vm_caprevoke_cookie *crc,
 		       int (*cb)(int *, const struct vm_caprevoke_cookie *,
 				 const uint8_t * __capability,
-				 int (*)(const uint8_t * __capability,
-					 const void * __capability),
+				 vm_caprevoke_test_fn,
 				 void * __capability * __capability,
 				 void * __capability),
 		       void * __capability * __capability mvu,
@@ -300,8 +214,7 @@ vm_caprevoke_page_iter(const struct vm_caprevoke_cookie *crc,
 
 	/* Load once up front, which is almost as good as const */
 	uint8_t _cloadtags_stride = cloadtags_stride;
-	int (*ctp)(const uint8_t * __capability, const void * __capability) =
-		crc->caprevoke_test_int;
+	vm_caprevoke_test_fn ctp = crc->caprevoke_test_int;
 	const uint8_t * __capability crshadow = crc->crshadow;
 
 	curthread->td_pcb->pcb_onfault = vm_caprevoke_tlb_fault;
@@ -351,7 +264,7 @@ vm_caprevoke_test(const struct vm_caprevoke_cookie *crc,
 	int res;
 
 	curthread->td_pcb->pcb_onfault = vm_caprevoke_tlb_fault;
-	res = crc->caprevoke_test_int(crc->crshadow, cut);
+	res = crc->caprevoke_test_int(crc->crshadow, cut, cheri_getperm(cut));
 	curthread->td_pcb->pcb_onfault = NULL;
 
 	return res;
@@ -399,14 +312,13 @@ static inline int
 vm_caprevoke_page_ro_adapt(int *res,
 			   const struct vm_caprevoke_cookie *vmcrc,
 		           const uint8_t * __capability crshadow,
-			   int (*ctp)(const uint8_t * __capability,
-				      const void * __capability),
+			   vm_caprevoke_test_fn ctp,
 			   void * __capability * __capability cutp,
 			   void * __capability cut)
 {
 	(void)cutp;
 
-	if (ctp(crshadow, cut)) {
+	if (ctp(crshadow, cut, cheri_getperm(cut))) {
 		*res = VM_CAPREVOKE_PAGE_DIRTY;
 		return 1;
 	}
@@ -455,31 +367,6 @@ vm_caprevoke_page_ro(const struct vm_caprevoke_cookie *crc, vm_page_t m)
 #endif
 
 	return res;
-}
-
-/*
- *
- */
-void
-vm_caprevoke_set_test(struct vm_caprevoke_cookie *crc, int flags)
-{
-	switch(flags) {
-	case VM_CAPREVOKE_CF_NO_COARSE_MEM
-		| VM_CAPREVOKE_CF_NO_OTYPES
-		| VM_CAPREVOKE_CF_NO_CIDS :
-
-		crc->caprevoke_test_int = vm_caprevoke_test_just_mem_fine;
-		break;
-
-	case VM_CAPREVOKE_CF_NO_OTYPES
-		| VM_CAPREVOKE_CF_NO_CIDS :
-
-		crc->caprevoke_test_int = vm_caprevoke_test_just_mem;
-		break;
-
-	default:
-		panic("Bad caprevoke cookie flags 0x%x\n", flags);
-	}
 }
 
 /*

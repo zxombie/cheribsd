@@ -76,6 +76,21 @@ cheri_revoke(void * __capability c)
 
 /***************************** KERNEL MI LAYER ******************************/
 
+	/*
+	 * To support optimization as to which bitmap(s) we look at,
+	 * given revocation runs may use different predicates on
+	 * capabilities under test.
+	 *
+	 * Takes cutperm = cheri_getperm(cut) as an argument for
+	 * optimization reasons.
+	 *
+	 * Returns any nonzero value to indicate revocation required.
+	 */
+typedef unsigned long (*vm_caprevoke_test_fn)(
+			const uint8_t * __capability shadow,
+			const void * __capability cut,
+			unsigned long cutperm);
+
 struct vm_caprevoke_cookie {
 	struct vm_map * map;			/* The map itself */
 	const uint8_t * __capability crshadow;	/* Access to the shadow space */
@@ -84,13 +99,7 @@ struct vm_caprevoke_cookie {
 	struct caprevoke_stats *stats;		/* Statistics */
 #endif
 
-	/*
-	 * To support optimization as to which bitmap(s) we look at,
-	 * given revocation runs may use different predicates on
-	 * capabilities under test.
-	 */
-	int (*caprevoke_test_int)(const uint8_t * __capability shadow,
-				  const void * __capability cut);
+	vm_caprevoke_test_fn caprevoke_test_int;
 };
 
 int vm_caprevoke_cookie_init(struct vm_map * map,
