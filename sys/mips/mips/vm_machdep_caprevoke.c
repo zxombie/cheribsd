@@ -200,6 +200,13 @@ SYSINIT(cloadtags_stride, SI_SUB_VM, SI_ORDER_ANY,
         measure_cloadtags_stride, NULL);
 #endif
 
+#define CPREFETCH(c) \
+	__asm__ __volatile__ ("pref 4, 0(%[addr])\n\t" \
+		: /* no out */ \
+		: [addr] "r" (cheri_getaddress(c)) \
+		: /* no clobber */)
+
+
 static inline int
 vm_caprevoke_page_iter(const struct vm_caprevoke_cookie *crc,
 		       int (*cb)(int *, const struct vm_caprevoke_cookie *,
@@ -211,29 +218,44 @@ vm_caprevoke_page_iter(const struct vm_caprevoke_cookie *crc,
 		       vm_offset_t mve)
 {
 	int res = 0;
+	uint64_t tags, nexttags;
+
+	CPREFETCH(mvu);
 
 	/* Load once up front, which is almost as good as const */
 	uint8_t _cloadtags_stride = cloadtags_stride;
 	vm_caprevoke_test_fn ctp = crc->caprevoke_test_int;
 	const uint8_t * __capability crshadow = crc->crshadow;
 
+	mve -= _cloadtags_stride * sizeof(void * __capability);
+
 	curthread->td_pcb->pcb_onfault = vm_caprevoke_tlb_fault;
 
 #ifdef CHERI_CAPREVOKE_CLOADTAGS
+	tags = __builtin_cheri_cap_load_tags(mvu);
+
 	for( ; cheri_getaddress(mvu) < mve; mvu += _cloadtags_stride ) {
 		void * __capability * __capability mvt = mvu;
-		uint64_t tags;
 
-		tags = __builtin_cheri_cap_load_tags(mvt);
-		if (tags != 0) {
-			/* We expect loads and no stores, thus hint 4 */
-			__asm__ __volatile__ (
-				"pref 4, 0(%[addr])\n\t"
-			  : /* no out */
-			  : [addr] "r" (cheri_getaddress(mvu))
-			  : /* no clobber */);
+		nexttags = __builtin_cheri_cap_load_tags(mvu + _cloadtags_stride);
+		if (nexttags != 0) {
+			CPREFETCH(mvu + _cloadtags_stride);
 		}
 
+		for(; tags != 0; (tags >>= 1), mvt += 1) {
+			if (!(tags & 1))
+				continue;
+
+			if (cb(&res, crc, crshadow, ctp, mvt, *mvt))
+				goto out;
+		}
+
+		tags = nexttags;
+	}
+
+	/* And the last line */
+	{
+		void * __capability * __capability mvt = mvu;
 		for(; tags != 0; (tags >>= 1), mvt += 1) {
 			if (!(tags & 1))
 				continue;
