@@ -160,7 +160,7 @@ _libcheri=	libcheri
 SUBDIR+= libsimple_printf
 .endif
 
-.if !defined(COMPAT_32BIT) && !defined(COMPAT_SOFTFP)
+.if !defined(COMPAT_32BIT) && !defined(COMPAT_64BIT) && !defined(COMPAT_SOFTFP)
 SUBDIR.${MK_CLANG}+=	clang
 .endif
 
