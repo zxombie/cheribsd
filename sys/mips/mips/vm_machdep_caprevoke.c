@@ -106,12 +106,9 @@ vm_do_caprevoke(int *res,
 		 */
 
 		CAPREVOKE_STATS_BUMP(crst, caps_found_revoked);
-	} else if (ctp(crshadow, cut, perms)) {
+	} else if (cheri_gettag(cut) && ctp(crshadow, cut, perms)) {
 		void * __capability cscratch;
 		int ok;
-
-		if (cheri_gettag(cut) == 0)
-			return 0;
 
 		void * __capability cutr = cheri_revoke(cut);
 
@@ -283,13 +280,15 @@ int
 vm_caprevoke_test(const struct vm_caprevoke_cookie *crc,
 		      const void * __capability cut)
 {
-	int res;
+	if (cheri_gettag(cut)) {
+		int res;
+		curthread->td_pcb->pcb_onfault = vm_caprevoke_tlb_fault;
+		res = crc->caprevoke_test_int(crc->crshadow, cut, cheri_getperm(cut));
+		curthread->td_pcb->pcb_onfault = NULL;
+		return res;
+	}
 
-	curthread->td_pcb->pcb_onfault = vm_caprevoke_tlb_fault;
-	res = crc->caprevoke_test_int(crc->crshadow, cut, cheri_getperm(cut));
-	curthread->td_pcb->pcb_onfault = NULL;
-
-	return res;
+	return 0;
 }
 
 int
@@ -340,7 +339,7 @@ vm_caprevoke_page_ro_adapt(int *res,
 {
 	(void)cutp;
 
-	if (ctp(crshadow, cut, cheri_getperm(cut))) {
+	if (cheri_gettag(cut) && ctp(crshadow, cut, cheri_getperm(cut))) {
 		*res = VM_CAPREVOKE_PAGE_DIRTY;
 		return 1;
 	}
