@@ -55,6 +55,8 @@ options 	NFSCL
 options 	NFSLOCKD
 options 	NFS_ROOT
 
+options		_KPOSIX_PRIORITY_SCHEDULING # Posix P1003_1B real-time extensions
+
 # Debugging for use in -current
 #options 	DEADLKRES		#Enable the deadlock resolver
 options 	INVARIANTS		#Enable calls of extra sanity checking
