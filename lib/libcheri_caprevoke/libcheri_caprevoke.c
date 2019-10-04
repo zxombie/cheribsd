@@ -159,15 +159,12 @@ caprev_shadow_nomap_masks(vaddr_t ob, size_t len, uint64_t *fwm, uint64_t *lwm)
    */
 
 static inline void
-caprev_shadow_nomap_common_pfx(uint64_t * __capability sb, void * __capability obj,
-             vaddr_t *ob, size_t *len, ptrdiff_t *fwo, ptrdiff_t *lwo,
+caprev_shadow_nomap_common_pfx(uint64_t * __capability sb,
+             vaddr_t ob, size_t len, ptrdiff_t *fwo, ptrdiff_t *lwo,
              uint64_t * __capability *fw
             )
 {
-  *ob = (__cheri_addr vaddr_t)obj;
-  *len = cheri_getlen(obj);
-
-  caprev_shadow_nomap_offsets(*ob, *len, fwo, lwo);
+  caprev_shadow_nomap_offsets(ob, len, fwo, lwo);
 
   *fw = cheri_setaddress(sb, VM_CAPREVOKE_BM_MEM_NOMAP + *fwo);
 }
@@ -176,15 +173,12 @@ caprev_shadow_nomap_common_pfx(uint64_t * __capability sb, void * __capability o
    * Mark an object for revocation using the indicated capability to the
    * correct fragment of the shadow bitmap.
    *
-   * The "privileged" object capability is expected to point to the full,
-   * actual bounds of the allocation and may (or may not) be subject to
-   * revocation; this capability determines which bits of the bitmap are in
-   * scope for changes.  The "user" object capability is expected to be a
-   * subset of the privileged object capability and, importantly, must be
-   * subject to revocation; this capability is used to guard against
-   * double-frees.  The two are provided separately to remove from the
-   * allocator the need to construct the priveleged capability while
-   * respecting (concurrently mutable!) taggedness of the user capability.
+   * The region of memory whose corresponding shadow space will be set is given
+   * by a base vaddr ob and a length len. The "user" object capability is
+   * expected to govern a subset of this region and, importantly, must be
+   * subject to revocation; it is used to guard against double-frees. The two
+   * are provided separately because the bounds of the "user" capability may
+   * have been shrunk so that they do not cover the entire underlying allocation.
    *
    * The masks here are additive: they're going to be OR'd with the shadow.
    *
@@ -195,16 +189,15 @@ caprev_shadow_nomap_common_pfx(uint64_t * __capability sb, void * __capability o
    */
 
 int
-caprev_shadow_nomap_set(uint64_t * __capability sb,
-                        void * __capability priv_obj,
-                        void * __capability user_obj)
+caprev_shadow_nomap_set_len(uint64_t * __capability sb,
+                            vaddr_t ob,
+                            size_t len,
+                            void * __capability user_obj)
 {
-  vaddr_t ob;
-  size_t len;
   ptrdiff_t fwo, lwo;
   uint64_t * __capability fw;
 
-  caprev_shadow_nomap_common_pfx(sb, priv_obj, &ob, &len, &fwo, &lwo, &fw);
+  caprev_shadow_nomap_common_pfx(sb, ob, len, &fwo, &lwo, &fw);
 
   uint64_t fwm = caprev_shadow_nomap_first_word_mask(ob, len);
 
@@ -336,20 +329,48 @@ caprev_shadow_nomap_set(uint64_t * __capability sb,
 }
 
   /*
-   * Clear an object from the shadow bitmap.
+   * Mark an object for revocation using the indicated capability to the
+   * correct fragment of the shadow bitmap.
+   *
+   * The "privileged" object capability is expected to point to the full,
+   * actual bounds of the allocation and may (or may not) be subject to
+   * revocation; this capability determines which bits of the bitmap are in
+   * scope for changes.  The "user" object capability is expected to be a
+   * subset of the privileged object capability and, importantly, must be
+   * subject to revocation; this capability is used to guard against
+   * double-frees.  The two are provided separately to remove from the
+   * allocator the need to construct the priveleged capability while
+   * respecting (concurrently mutable!) taggedness of the user capability.
+   *
+   * The masks here are additive: they're going to be OR'd with the shadow.
+   *
+   * Returns 0 on success or 1 if the calling free() should skip this
+   * capability, as it has either become de-tagged or is at least partially
+   * already marked in the bitmap (as might happen, for example, with a
+   * racing second call to free on the same pointer).
+   */
+
+int
+caprev_shadow_nomap_set(uint64_t * __capability sb,
+                        void * __capability priv_obj,
+                        void * __capability user_obj)
+{
+  return caprev_shadow_nomap_set_len(sb, (__cheri_addr vaddr_t)priv_obj, cheri_getlen(priv_obj), user_obj);
+}
+
+  /*
+   * Clear a region from the shadow bitmap.
    *
    * The masks here are subtractive: they're going to be AND'd with the shadow.
    */
 
 void
-caprev_shadow_nomap_clear(uint64_t * __capability sb, void * __capability obj)
+caprev_shadow_nomap_clear_len(uint64_t * __capability sb, vaddr_t ob, size_t len)
 {
-  vaddr_t ob;
-  size_t len;
   ptrdiff_t fwo, lwo;
   uint64_t * __capability fw;
 
-  caprev_shadow_nomap_common_pfx(sb, obj, &ob, &len, &fwo, &lwo, &fw);
+  caprev_shadow_nomap_common_pfx(sb, ob, len, &fwo, &lwo, &fw);
 
   uint64_t fwm = ~caprev_shadow_nomap_first_word_mask(ob, len);
 
@@ -393,6 +414,18 @@ caprev_shadow_nomap_clear(uint64_t * __capability sb, void * __capability obj)
    * store-barrier at the end of whatever set of objects is being cleared from
    * the shadow, before those objects may be released to the application.
    */
+}
+
+  /*
+   * Clear an object from the shadow bitmap.
+   *
+   * The masks here are subtractive: they're going to be AND'd with the shadow.
+   */
+
+void
+caprev_shadow_nomap_clear(uint64_t * __capability sb, void * __capability obj)
+{
+  return caprev_shadow_nomap_clear_len(sb, (__cheri_addr vaddr_t)obj, cheri_getlen(obj));
 }
 
 /*
