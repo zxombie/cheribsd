@@ -385,4 +385,5 @@ MIASM =  \
 	cheriabi_fhlink.o \
 	cheriabi_fhlinkat.o \
 	cheriabi_fhreadlink.o \
-	cheriabi_funlinkat.o
+	cheriabi_funlinkat.o \
+	cheriabi_copy_file_range.o
