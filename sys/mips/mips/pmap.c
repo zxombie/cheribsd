@@ -1499,8 +1499,10 @@ pmap_pv_reclaim(pmap_t locked_pmap)
 				m = PHYS_TO_VM_PAGE(TLBLO_PTE_TO_PA(oldpte));
 				if (pte_test(&oldpte, PTE_D))
 					vm_page_dirty(m);
+#ifdef PTE_SC
 				if (pte_test(&oldpte, PTE_SC) == 0)
 					vm_page_capdirty(m);
+#endif
 				if (m->md.pv_flags & PV_TABLE_REF)
 					vm_page_aflag_set(m, PGA_REFERENCED);
 				m->md.pv_flags &= ~PV_TABLE_REF;
@@ -1774,8 +1776,10 @@ pmap_remove_pte(struct pmap *pmap, pt_entry_t *ptq, vm_offset_t va,
 			    __func__, (void *)va, (uintmax_t)oldpte));
 			vm_page_dirty(m);
 		}
+#ifdef PTE_SC
 		if (pte_test(&oldpte, PTE_SC) == 0)
 			vm_page_capdirty(m);
+#endif
 		if (m->md.pv_flags & PV_TABLE_REF)
 			vm_page_aflag_set(m, PGA_REFERENCED);
 		m->md.pv_flags &= ~PV_TABLE_REF;
@@ -1955,8 +1959,10 @@ pmap_remove_all(vm_page_t m)
 			    __func__, (void *)pv->pv_va, (uintmax_t)tpte));
 			vm_page_dirty(m);
 		}
+#ifdef PTE_SC
 		if (pte_test(&tpte, PTE_SC) == 0)
 			vm_page_capdirty(m);
+#endif
 		pmap_invalidate_page(pmap, pv->pv_va);
 
 		TAILQ_REMOVE(&m->md.pv_list, pv, pv_next);
@@ -2050,6 +2056,7 @@ pmap_protect(pmap_t pmap, vm_offset_t sva, vm_offset_t eva, vm_prot_t prot)
 					va = va_next;
 				}
 			}
+#ifdef PTE_SC
 			if (pte_test(&pbits, PTE_SC) == 0) {
 				pte_set(&pbits, PTE_SC);
 				if (pte_test(&pbits, PTE_MANAGED)) {
@@ -2058,6 +2065,7 @@ pmap_protect(pmap_t pmap, vm_offset_t sva, vm_offset_t eva, vm_prot_t prot)
 					vm_page_capdirty(m);
 				}
 			}
+#endif
 			*pte = pbits;
 		}
 		if (va != va_next)
@@ -2162,9 +2170,11 @@ pmap_enter(pmap_t pmap, vm_offset_t va, vm_page_t m, vm_prot_t prot,
 	KASSERT(!pte_test(&origpte, PTE_D | PTE_RO | PTE_VALID),
 	    ("pmap_enter: modified page not writable: va: %p, pte: %#jx",
 	    (void *)va, (uintmax_t)origpte));
+#ifdef PTE_SC
 	KASSERT(!pte_test(&origpte, PTE_CRO | PTE_VALID) || pte_test(&origpte, PTE_SC),
 	    ("pmap_enter: capdirty with CRO set: va: %p, pte: %#jx",
 	    (void *)va, (uintmax_t)origpte));
+#endif
 	opa = TLBLO_PTE_TO_PA(origpte);
 
 	/*
@@ -2214,8 +2224,10 @@ pmap_enter(pmap_t pmap, vm_offset_t va, vm_page_t m, vm_prot_t prot,
 			om = PHYS_TO_VM_PAGE(opa);
 			if (pte_test(&origpte, PTE_D))
 				vm_page_dirty(om);
+#ifdef PTE_SC
 			if (pte_test(&origpte, PTE_SC) == 0)
 				vm_page_capdirty(m);
+#endif
 			if ((om->md.pv_flags & PV_TABLE_REF) != 0) {
 				om->md.pv_flags &= ~PV_TABLE_REF;
 				vm_page_aflag_set(om, PGA_REFERENCED);
@@ -2281,9 +2293,11 @@ validate:
 				if (pte_test(&origpte, PTE_MANAGED))
 					vm_page_dirty(m);
 			}
+#ifdef PTE_SC
 			if ((pte_test(&origpte, PTE_SC) == 0)
 			    && pte_test(&origpte, PTE_MANAGED))
 				vm_page_capdirty(m);
+#endif
 			pmap_update_page(pmap, va, newpte);
 		}
 	}
@@ -2999,8 +3013,10 @@ pmap_remove_pages(pmap_t pmap)
 				 */
 				if (pte_test(&tpte, PTE_D))
 					vm_page_dirty(m);
+#ifdef PTE_SC
 				if (pte_test(&tpte, PTE_SC) == 0)
 					vm_page_capdirty(m);
+#endif
 
 				/* Mark free */
 				PV_STAT(pv_entry_frees++);
@@ -3114,10 +3130,12 @@ pmap_remove_write(vm_page_t m)
 			pte_clear(&pbits, PTE_D);
 			vm_page_dirty(m);
 		}
+#ifdef PTE_SC
 		if (pte_test(&pbits, PTE_SC) == 0) {
 			pte_set(&pbits, PTE_SC);
 			vm_page_capdirty(m);
 		}
+#endif
 		pte_set(&pbits, PTE_RO);
 		if (pbits != *pte) {
 			*pte = pbits;
@@ -3284,10 +3302,12 @@ pmap_advise(pmap_t pmap, vm_offset_t sva, vm_offset_t eva, int advice)
 					va = va_next;
 				}
 			}
+#ifdef PTE_SC
 			if (pte_test(pte, PTE_SC) == 0) {
 				pte_set(pte, PTE_SC);
 				vm_page_capdirty(m);
 			}
+#endif
 		}
 		if (va != va_next)
 			pmap_invalidate_range(pmap, va, sva);
@@ -3435,8 +3455,10 @@ retry:
 	val = MINCORE_INCORE;
 	if (pte_test(&pte, PTE_D))
 		val |= MINCORE_MODIFIED | MINCORE_MODIFIED_OTHER;
+#ifdef PTE_SC
 	if (pte_test(&pte, PTE_SC) == 0)
 		val |= MINCORE_MAYHAVECAP;
+#endif
 	pa = TLBLO_PTE_TO_PA(pte);
 	if (pte_test(&pte, PTE_MANAGED)) {
 		/*
@@ -3689,7 +3711,7 @@ pmap_emulate_referenced(pmap_t pmap, vm_offset_t va)
 	return (1);
 }
 
-#ifdef CPU_CHERI
+#if __has_feature(capabilities)
 
 /*
  * For every mapping of this page, collect and clear its capdirty PTE

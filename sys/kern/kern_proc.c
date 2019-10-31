@@ -2801,15 +2801,18 @@ kern_proc_vmmap_out(struct proc *p, struct sbuf *sb, ssize_t maxlen,
 				vref(vp);
 			if (lobj != obj)
 				VM_OBJECT_RUNLOCK(lobj);
-
+#ifdef OBJ_NOSTORETAGS
 			if ((obj->flags & OBJ_NOSTORETAGS) == 0) {
 				kve->kve_protection |= KVME_PROT_WRITECAPS;
 				kve->kve_max_protection |= KVME_PROT_WRITECAPS;
 			}
+#endif
+#ifdef OBJ_NOLOADTAGS
 			if ((obj->flags & OBJ_NOLOADTAGS) == 0) {
 				kve->kve_protection |= KVME_PROT_READCAPS;
 				kve->kve_max_protection |= KVME_PROT_READCAPS;
 			}
+#endif
 
 			kve->kve_ref_count = obj->ref_count;
 			kve->kve_shadow_count = obj->shadow_count;

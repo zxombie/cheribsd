@@ -188,7 +188,9 @@
 #define	MINCORE_REFERENCED_OTHER 0x8 /* Page has been referenced */
 #define	MINCORE_MODIFIED_OTHER	0x10 /* Page has been modified */
 #define	MINCORE_SUPER		0x20 /* Page is a "super" page */
+#if __has_feature(capabilities)
 #define MINCORE_MAYHAVECAP	0x40 /* Page may contain capabilities */
+#endif
 
 /*
  * Anonymous object constant for shm_open().

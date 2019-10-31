@@ -1145,7 +1145,7 @@ RestartScan:
 				    pmap_is_referenced(m) ||
 				    (m->aflags & PGA_REFERENCED) != 0)
 					mincoreinfo |= MINCORE_REFERENCED_OTHER;
-
+#ifdef MINCORE_MAYHAVECAP
 				/*
 				 * The pmap may have told us that this
 				 * particular mapping is already capdirty,
@@ -1159,6 +1159,7 @@ RestartScan:
 					pmap_tc_capdirty(m) ||
 					((m->aflags & PGA_CAPSTORED) != 0))
 					mincoreinfo |= MINCORE_MAYHAVECAP;
+#endif
 			}
 			if (object != NULL)
 				VM_OBJECT_WUNLOCK(object);

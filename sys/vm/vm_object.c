@@ -1327,6 +1327,8 @@ vm_object_shadow(
 		VM_OBJECT_WUNLOCK(source);
 	}
 
+#if defined(OBJ_NOSTORETAGS) && defined(OBJ_NOLOADTAGS)
+	)
 	/*
 	 * XXX CHERI: This does not feel like the right place to do this,
 	 * and yet here we are.
@@ -1339,7 +1341,7 @@ vm_object_shadow(
 	if (source->type == OBJT_DEFAULT)
 		result->flags |= source->flags
 				& (OBJ_NOLOADTAGS | OBJ_NOSTORETAGS);
-
+#endif
 
 	/*
 	 * Return the new things

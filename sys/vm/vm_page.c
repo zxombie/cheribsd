@@ -1597,6 +1597,7 @@ vm_page_replace(vm_page_t mnew, vm_object_t object, vm_pindex_t pindex)
 	if (pmap_page_is_write_mapped(mnew))
 		vm_object_set_writeable_dirty(object);
 
+#ifdef PGA_CAPSTORED
 	/*
 	 * Copy across capability tracking flags
 	 */
@@ -1604,6 +1605,7 @@ vm_page_replace(vm_page_t mnew, vm_object_t object, vm_pindex_t pindex)
 		vm_page_capdirty(mnew);
 	if (mold->oflags & VPO_PASTCAPSTORE)
 		mnew->oflags |= VPO_PASTCAPSTORE;
+#endif
 
 	return (mold);
 }

@@ -237,7 +237,9 @@ struct vm_page {
 #define	VPO_UNMANAGED	0x04		/* no PV management for page */
 #define	VPO_SWAPINPROG	0x08		/* swap I/O in progress on page */
 #define	VPO_NOSYNC	0x10		/* do not collect for syncer */
+#if __has_feature(capabilities)
 #define	VPO_PASTCAPSTORE 0x20	/* This page had capabilities in the past */
+#endif
 
 /*
  * Busy page implementation details.
@@ -377,7 +379,9 @@ extern struct mtx_padalign pa_lock[];
 #define	PGA_DEQUEUE	0x10		/* page is due to be dequeued */
 #define	PGA_REQUEUE	0x20		/* page is due to be requeued */
 #define	PGA_REQUEUE_HEAD 0x40		/* page requeue should bypass LRU */
+#if __has_feature(capabilities)
 #define	PGA_CAPSTORED	0x80
+#endif
 
 #define	PGA_QUEUE_STATE_MASK	(PGA_ENQUEUED | PGA_DEQUEUE | PGA_REQUEUE | \
 				PGA_REQUEUE_HEAD)
@@ -784,9 +788,13 @@ vm_page_dirty(vm_page_t m)
 static __inline void
 vm_page_capdirty(vm_page_t m)
 {
+#ifdef PGA_CAPSTORED
 	if ((m->aflags & PGA_CAPSTORED) == 0) {
 		vm_page_aflag_set(m, PGA_CAPSTORED);
 	}
+#else
+	(void)m;
+#endif
 }
 
 /*
