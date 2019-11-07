@@ -1328,7 +1328,6 @@ vm_object_shadow(
 	}
 
 #if defined(OBJ_NOSTORETAGS) && defined(OBJ_NOLOADTAGS)
-	)
 	/*
 	 * XXX CHERI: This does not feel like the right place to do this,
 	 * and yet here we are.
