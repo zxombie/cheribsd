@@ -250,8 +250,8 @@ reentry:
 			 */
 fast_out:
 			vm_map_unlock(vmm);
-			vm_caprevoke_cookie_rele(&vmcrc);
 			cv_signal(&vmm->vm_caprev_cv);
+			vm_caprevoke_cookie_rele(&vmcrc);
 			vmspace_free(vm);
 			stat.epoch_fini = epoch;
 			return cheriabi_caprevoke_fini(td, uap, ires, &stat);
@@ -295,8 +295,8 @@ fast_out:
 			}
 
 			/* There is another revoker in progress.  Wait. */
-			ires = cv_wait_sig(&vmm->vm_caprev_cv,
-				&td->td_proc->p_mtx);
+			KASSERT(vmm->system_map == 0, ("System map?"));
+			ires = cv_wait_sig(&vmm->vm_caprev_cv, &vmm->lock);
 			if (ires != 0) {
 				goto fast_out;
 			}
