@@ -157,9 +157,12 @@ vm_caprevoke_visit_ro(const struct vm_caprevoke_cookie *crc, int flags,
 static void
 vm_caprevoke_unwire_in_situ(vm_page_t m)
 {
+	bool active;
+
 	vm_page_lock(m);
-	vm_page_unwire(m, vm_page_active(m) ? PQ_ACTIVE : PQ_INACTIVE);
+	active = vm_page_active(m);
 	vm_page_unlock(m);
+	vm_page_unwire(m, active ? PQ_ACTIVE : PQ_INACTIVE);
 }
 
 enum vm_cro_at {
@@ -233,7 +236,7 @@ vm_caprevoke_object_at(const struct vm_caprevoke_cookie *crc, int flags,
 		VM_OBJECT_WUNLOCK(obj);
 
 		vm_map_unlock_read(map);
-		res = vm_fault_hold(map, addr, VM_PROT_READ, VM_FAULT_NORMAL,
+		res = vm_fault(map, addr, VM_PROT_READ, VM_FAULT_NORMAL,
 				    &m);
 		vm_map_lock_read(map);
 
@@ -252,9 +255,7 @@ vm_caprevoke_object_at(const struct vm_caprevoke_cookie *crc, int flags,
 			 * page active because we're most likely about to
 			 * come right back.
 			 */
-			vm_page_lock(m);
 			vm_page_unwire(m, PQ_ACTIVE);
-			vm_page_unlock(m);
 			return VM_CAPREVOKE_AT_TICK;
 		}
 
@@ -331,7 +332,7 @@ vm_caprevoke_object_at(const struct vm_caprevoke_cookie *crc, int flags,
 
 	VM_OBJECT_WUNLOCK(m->object);
 	vm_map_unlock_read(map);
-	res = vm_fault_hold(map, addr, VM_PROT_WRITE, VM_FAULT_NORMAL, &m);
+	res = vm_fault(map, addr, VM_PROT_WRITE, VM_FAULT_NORMAL, &m);
 	vm_map_lock_read(map);
 	if (res != KERN_SUCCESS) {
 		*vmres = res;
@@ -339,9 +340,7 @@ vm_caprevoke_object_at(const struct vm_caprevoke_cookie *crc, int flags,
 		return VM_CAPREVOKE_AT_VMERR;
 	}
 	if (last_timestamp != map->timestamp) {
-		vm_page_lock(m);
 		vm_page_unwire(m, PQ_ACTIVE);
-		vm_page_unlock(m);
 		VM_OBJECT_ASSERT_UNLOCKED(obj);
 		return VM_CAPREVOKE_AT_TICK;
 	}

@@ -387,7 +387,7 @@ freebsd64_copyinuio(struct iovec64 * __capability iovp, u_int iovcnt,
     struct uio **uiop)
 {
 	struct iovec64 iov64;
-	kiovec_t *iov;
+	struct iovec *iov;
 	struct uio *uio;
 	size_t iovlen;
 	int error, i;
@@ -395,9 +395,9 @@ freebsd64_copyinuio(struct iovec64 * __capability iovp, u_int iovcnt,
 	*uiop = NULL;
 	if (iovcnt > UIO_MAXIOV)
 		return (EINVAL);
-	iovlen = iovcnt * sizeof(kiovec_t);
+	iovlen = iovcnt * sizeof(struct iovec);
 	uio = malloc(iovlen + sizeof(*uio), M_IOV, M_WAITOK);
-	iov = (kiovec_t *)(uio + 1);
+	iov = (struct iovec *)(uio + 1);
 	for (i = 0; i < iovcnt; i++) {
 		error = copyin_c(&iovp[i], &iov64, sizeof(iov64));
 		if (error) {
@@ -424,17 +424,17 @@ freebsd64_copyinuio(struct iovec64 * __capability iovp, u_int iovcnt,
 
 int
 freebsd64_copyiniov(struct iovec64 * __capability iov64, u_int iovcnt,
-    kiovec_t **iovp, int error)
+    struct iovec **iovp, int error)
 {
-	uiovec_t useriov;
-	kiovec_t *iovs;
+	struct iovec_native useriov;
+	struct iovec *iovs;
 	size_t iovlen;
 	int i;
 
 	*iovp = NULL;
 	if (iovcnt > UIO_MAXIOV)
 		return (error);
-	iovlen = iovcnt * sizeof(kiovec_t);
+	iovlen = iovcnt * sizeof(struct iovec);
 	iovs = malloc(iovlen, M_IOV, M_WAITOK);
 	for (i = 0; i < iovcnt; i++) {
 		error = copyin_c(iov64 + i, &useriov, sizeof(useriov));
@@ -450,7 +450,7 @@ freebsd64_copyiniov(struct iovec64 * __capability iov64, u_int iovcnt,
 
 static int
 freebsd64_copyin_hdtr(const struct sf_hdtr64 * __capability uhdtr,
-    ksf_hdtr_t *hdtr)
+    struct sf_hdtr *hdtr)
 {
 	struct sf_hdtr64 hdtr64;
 	int error;
@@ -613,9 +613,143 @@ freebsd64_nmount(struct thread *td, struct freebsd64_nmount_args *uap)
 register_t *
 freebsd64_copyout_strings(struct image_params *imgp)
 {
+	int argc, envc;
+	uint64_t *vectp;
+	char *stringp;
+	char *destp;
+	uint64_t *stack_base;
+	struct freebsd64_ps_strings *arginfo;
+	struct proc *p;
+	size_t execpath_len;
+	int szsigcode, szps;
+	char canary[sizeof(long) * 8];
 
-	/* XXX: works while exec_copyout_strings isn't cheriabi aware */
-	return (exec_copyout_strings(imgp));
+	szps = sizeof(pagesizes[0]) * MAXPAGESIZES;
+	/*
+	 * Calculate string base and vector table pointers.
+	 * Also deal with signal trampoline code for this exec type.
+	 */
+	if (imgp->execpath != NULL && imgp->auxargs != NULL)
+		execpath_len = strlen(imgp->execpath) + 1;
+	else
+		execpath_len = 0;
+	p = imgp->proc;
+	szsigcode = 0;
+	arginfo = (struct freebsd64_ps_strings *)p->p_sysent->sv_psstrings;
+	if (p->p_sysent->sv_sigcode_base == 0)
+		szsigcode = *(p->p_sysent->sv_szsigcode);
+	else
+		szsigcode = 0;
+	destp =	(char *)arginfo;
+
+	/*
+	 * install sigcode
+	 */
+	if (szsigcode != 0) {
+		destp -= szsigcode;
+		destp = __builtin_align_down(destp, sizeof(uint64_t));
+		copyout(p->p_sysent->sv_sigcode, destp, szsigcode);
+	}
+
+	/*
+	 * Copy the image path for the rtld.
+	 */
+	if (execpath_len != 0) {
+		destp -= execpath_len;
+		imgp->execpathp = (uintptr_t)destp;
+		copyout(imgp->execpath, destp, execpath_len);
+	}
+
+	/*
+	 * Prepare the canary for SSP.
+	 */
+	arc4rand(canary, sizeof(canary), 0);
+	destp -= sizeof(canary);
+	imgp->canary = (uintptr_t)destp;
+	copyout(canary, destp, sizeof(canary));
+	imgp->canarylen = sizeof(canary);
+
+	/*
+	 * Prepare the pagesizes array.
+	 */
+	destp -= szps;
+	destp = __builtin_align_down(destp, sizeof(uint64_t));
+	imgp->pagesizes = (uintptr_t)destp;
+	copyout(pagesizes, destp, szps);
+	imgp->pagesizeslen = szps;
+
+	destp -= ARG_MAX - imgp->args->stringspace;
+	destp = __builtin_align_down(destp, sizeof(uint64_t));
+
+	vectp = (uint64_t *)destp;
+	if (imgp->sysent->sv_stackgap != NULL)
+		imgp->sysent->sv_stackgap(imgp, (u_long *)&vectp);
+
+	if (imgp->auxargs) {
+		/*
+		 * Allocate room on the stack for the ELF auxargs
+		 * array.  It has up to AT_COUNT entries.
+		 */
+		vectp -= howmany(AT_COUNT * sizeof(Elf64_Auxinfo),
+		    sizeof(*vectp));
+	}
+
+	/*
+	 * Allocate room for the argv[] and env vectors including the
+	 * terminating NULL pointers.
+	 */
+	vectp -= imgp->args->argc + 1 + imgp->args->envc + 1;
+
+	/*
+	 * vectp also becomes our initial stack base
+	 */
+	stack_base = vectp;
+
+	stringp = imgp->args->begin_argv;
+	argc = imgp->args->argc;
+	envc = imgp->args->envc;
+
+	/*
+	 * Copy out strings - arguments and environment.
+	 */
+	copyout(stringp, destp, ARG_MAX - imgp->args->stringspace);
+
+	/*
+	 * Fill in "ps_strings" struct for ps, w, etc.
+	 */
+	suword(&arginfo->ps_argvstr, (uint64_t)(intptr_t)vectp);
+	suword32(&arginfo->ps_nargvstr, argc);
+
+	/*
+	 * Fill in argument portion of vector table.
+	 */
+	for (; argc > 0; --argc) {
+		suword(vectp++, (uint64_t)(intptr_t)destp);
+		while (*stringp++ != 0)
+			destp++;
+		destp++;
+	}
+
+	/* a null vector table pointer separates the argp's from the envp's */
+	suword(vectp++, 0);
+
+	suword(&arginfo->ps_envstr, (uint64_t)(intptr_t)vectp);
+	suword32(&arginfo->ps_nenvstr, envc);
+
+	/*
+	 * Fill in environment portion of vector table.
+	 */
+	for (; envc > 0; --envc) {
+		suword(vectp++, (uint64_t)(intptr_t)destp);
+		while (*stringp++ != 0)
+			destp++;
+		destp++;
+	}
+
+	/* end of vector table is a null pointer */
+	suword(vectp, 0);
+
+	return ((register_t *)stack_base);
 }
 
 int
@@ -1204,6 +1338,25 @@ freebsd64___sysctl(struct thread *td, struct freebsd64___sysctl_args *uap)
 	    uap->namelen, __USER_CAP_UNBOUND(uap->old),
 	    __USER_CAP_OBJ(uap->oldlenp), __USER_CAP(uap->new, uap->newlen),
 	    uap->newlen, 0));
+}
+
+int
+freebsd64___sysctlbyname(struct thread *td, struct
+    freebsd64___sysctlbyname_args *uap)
+{
+	size_t rv;
+	int error;
+
+	error = kern___sysctlbyname(td, __USER_CAP(uap->name, uap->namelen),
+	    uap->namelen, __USER_CAP_UNBOUND(uap->old),
+	    __USER_CAP_OBJ(uap->oldlenp), __USER_CAP(uap->new, uap->newlen),
+	    uap->newlen, &rv, 0, 0);
+	if (error != 0)
+		return (error);
+	if (uap->oldlenp != NULL)
+		error = copyout(&rv, uap->oldlenp, sizeof(rv));
+
+	return (error);
 }
 
 /*

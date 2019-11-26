@@ -88,9 +88,9 @@ convert_sigevent64(const struct sigevent64 *sig64, ksigevent_t *sig)
 int
 freebsd64_sigaction(struct thread *td, struct freebsd64_sigaction_args *uap)
 {
-	ksigaction_t act, oact;
+	struct sigaction act, oact;
 	struct sigaction64 act64, oact64;
-	ksigaction_t *actp, *oactp;
+	struct sigaction *actp, *oactp;
 	int error;
 
 	actp = (uap->act != NULL) ? &act : NULL;
@@ -199,7 +199,7 @@ freebsd64_sigaltstack(struct thread *td,
 	int error;
 
 	if (uap->ss != NULL) {
-		error = copyin(uap->ss, &ss64, sizeof(ss));
+		error = copyin(uap->ss, &ss64, sizeof(ss64));
 		if (error != 0)
 			return (error);
 		ss.ss_sp = __USER_CAP_UNBOUND(ss64.ss_sp);
@@ -215,7 +215,7 @@ freebsd64_sigaltstack(struct thread *td,
 		ss64.ss_sp = (__cheri_fromcap void *)oss.ss_sp;
 		ss64.ss_size = oss.ss_size;
 		ss64.ss_flags = oss.ss_flags;
-		error = copyout(&ss64, uap->oss, sizeof(oss));
+		error = copyout(&ss64, uap->oss, sizeof(ss64));
 	}
 	return (error);
 }
