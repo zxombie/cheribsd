@@ -344,8 +344,8 @@ tls_malloc(size_t nbytes)
 #ifdef __CHERI_PURE_CAPABILITY__
 	size_t align, mask;
 
-	nbytes = CHERI_REPRESENTABLE_LENGTH(nbytes);
 	mask = CHERI_REPRESENTABLE_ALIGNMENT_MASK(nbytes);
+	nbytes = CHERI_REPRESENTABLE_LENGTH(nbytes);
 	align = 1 + ~mask;
 
 	if (mask != SIZE_MAX && align > MALLOC_ALIGNMENT)
@@ -564,8 +564,8 @@ tls_malloc_aligned(size_t nbytes, size_t align)
 #ifdef __CHERI_PURE_CAPABILITY__
 	size_t mask;
 
-	nbytes = CHERI_REPRESENTABLE_LENGTH(nbytes);
 	mask = CHERI_REPRESENTABLE_ALIGNMENT_MASK(nbytes);
+	nbytes = CHERI_REPRESENTABLE_LENGTH(nbytes);
 	if (align < 1 + ~mask)
 		align = 1 + ~mask;
 #endif

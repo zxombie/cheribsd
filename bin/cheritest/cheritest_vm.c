@@ -650,7 +650,7 @@ static int
 check_revoked(void * __capability r)
 {
 	return ((cheri_gettag(r) == 1)
-		&& (cheri_gettype(r) == (uint64_t)(-1))
+		&& (cheri_gettype(r) == (int64_t)(-1))
 		&& (cheri_getperm(r) == 0));
 }
 
