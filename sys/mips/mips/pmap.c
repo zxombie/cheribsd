@@ -2119,7 +2119,7 @@ pmap_enter(pmap_t pmap, vm_offset_t va, vm_page_t m, vm_prot_t prot,
 	 * I am sure I am just holding something wrong.
 	 */
 	if ((((m->oflags & VPO_UNMANAGED) == 0)
-		&& ((m->aflags & PGA_CAPSTORED) == 0))
+		&& ((m->a.flags & PGA_CAPSTORED) == 0))
 	    || ((flags & PMAP_ENTER_NOSTORETAGS) != 0))
 		newpte |= PTE_SC;
 	if ((flags & PMAP_ENTER_NOSTORETAGS) != 0)
@@ -3668,10 +3668,8 @@ pmap_tc_capdirty(vm_page_t m)
 	 * is clear, no PTEs can have PTE_SC clear.
 	 */
 	VM_OBJECT_ASSERT_LOCKED(m->object);
-	if (!vm_page_xbusied(m) && (m->aflags & PGA_WRITEABLE) == 0)
-		return (FALSE);
 
-	found = (m->aflags & PGA_CAPSTORED) != 0;
+	found = (m->a.flags & PGA_CAPSTORED) != 0;
 
 	rw_wlock(&pvh_global_lock);
 	TAILQ_FOREACH(pv, &m->md.pv_list, pv_list) {
