@@ -432,9 +432,14 @@ vm_map_entry_abandon(vm_map_t map, vm_map_entry_t old_entry)
 	boolean_t found, grown_down;
 	int rv;
 
-	prev = old_entry->prev;
-	next = old_entry->next;
 	start = old_entry->start;
+
+	if (start != 0)
+		vm_map_lookup_entry(map, start-1, &prev);
+	else
+		prev = &map->header;
+	next = vm_map_entry_succ(old_entry);
+
 	end = old_entry->end;
 	grown_down = old_entry->eflags & MAP_ENTRY_GROWS_DOWN;
 	vm_map_entry_delete(map, old_entry);
@@ -487,7 +492,7 @@ vm_map_entry_abandon(vm_map_t map, vm_map_entry_t old_entry)
 	if (grown_down)
 		entry->eflags |= MAP_ENTRY_GROWS_DOWN;
 
-	vm_map_try_merge_entries(map, entry->prev, entry);
+	vm_map_try_merge_entries(map, prev, entry);
 }
 
 void
