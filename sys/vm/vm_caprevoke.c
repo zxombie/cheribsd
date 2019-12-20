@@ -40,7 +40,7 @@ vm_caprevoke_should_visit_page(vm_page_t m, int flags)
 	 * If a page is capdirty, visit this page.  On incremental passes,
 	 * this should catch a superset of the pages we need to visit.
 	 */
-	if (m->aflags & PGA_CAPSTORED)
+	if (m->a.flags & PGA_CAPSTORED)
 		return 1;
 
 	/*
@@ -134,10 +134,10 @@ vm_caprevoke_visit_ro(const struct vm_caprevoke_cookie *crc, int flags,
 
 	KASSERT(!(hascaps & VM_CAPREVOKE_PAGE_HASCAPS)
 		|| ((m->oflags & VPO_PASTCAPSTORE)
-		    || (m->aflags & PGA_CAPSTORED)),
+		    || (m->a.flags & PGA_CAPSTORED)),
 		("cap-bearing RO page without h/r capdirty?"
 			" hc=%x m=%p, m->of=%x, m->af=%x",
-			hascaps, m, m->oflags, m->aflags));
+			hascaps, m, m->oflags, m->a.flags));
 
 	VM_OBJECT_WLOCK(m->object);
 	vm_page_xunbusy(m);
@@ -357,7 +357,7 @@ visit_rw:
 	case VM_CAPREVOKE_VIS_DONE:
 visit_rw_ok:
 
-		KASSERT(((m->aflags & PGA_CAPSTORED) == 0)
+		KASSERT(((m->a.flags & PGA_CAPSTORED) == 0)
 			|| !(flags & VM_CAPREVOKE_LAST_INIT),
 			("Capdirty page after visit with world stopped?"));
 
@@ -539,7 +539,7 @@ vm_caprevoke(const struct vm_caprevoke_cookie *crc, int flags)
 	vm_map_busy(map);
 	vm_map_lock_downgrade(map);
 
-	entry = map->header.next;
+	entry = vm_map_entry_first(map);
 
 	if (entry != &map->header)
 		addr = entry->start;
@@ -560,7 +560,7 @@ vm_caprevoke(const struct vm_caprevoke_cookie *crc, int flags)
 			goto out;
 
 		if (!vm_map_lookup_entry(map, addr, &entry)) {
-			entry = entry->next;
+			entry = vm_map_entry_succ(entry);
 			if (entry != &map->header)
 				addr = entry->start;
 		}
