@@ -121,6 +121,7 @@ __FBSDID("$FreeBSD$");
 #include <security/audit/audit.h>
 
 #include <cheri/cheri.h>
+#include <cheri/cheric.h>
 
 #include <compat/freebsd64/freebsd64.h>
 #include <compat/freebsd64/freebsd64_util.h>
@@ -611,12 +612,12 @@ freebsd64_nmount(struct thread *td, struct freebsd64_nmount_args *uap)
 }
 
 int
-freebsd64_copyout_strings(struct image_params *imgp, register_t **stack_base)
+freebsd64_copyout_strings(struct image_params *imgp, uintcap_t *stack_base)
 {
 	int argc, envc;
 	uint64_t *vectp;
 	char *stringp;
-	char *destp;
+	uintptr_t destp, ustringp;
 	struct freebsd64_ps_strings *arginfo;
 	struct proc *p;
 	size_t execpath_len;
@@ -635,11 +636,12 @@ freebsd64_copyout_strings(struct image_params *imgp, register_t **stack_base)
 	p = imgp->proc;
 	szsigcode = 0;
 	arginfo = (struct freebsd64_ps_strings *)p->p_sysent->sv_psstrings;
+	imgp->ps_strings = cheri_fromint((uintptr_t)arginfo);
 	if (p->p_sysent->sv_sigcode_base == 0)
 		szsigcode = *(p->p_sysent->sv_szsigcode);
 	else
 		szsigcode = 0;
-	destp =	(char *)arginfo;
+	destp =	(uintptr_t)arginfo;
 
 	/*
 	 * install sigcode
@@ -647,7 +649,8 @@ freebsd64_copyout_strings(struct image_params *imgp, register_t **stack_base)
 	if (szsigcode != 0) {
 		destp -= szsigcode;
 		destp = __builtin_align_down(destp, sizeof(uint64_t));
-		error = copyout(p->p_sysent->sv_sigcode, destp, szsigcode);
+		error = copyout(p->p_sysent->sv_sigcode, (void *)destp,
+		    szsigcode);
 		if (error != 0)
 			return (error);
 	}
@@ -657,8 +660,8 @@ freebsd64_copyout_strings(struct image_params *imgp, register_t **stack_base)
 	 */
 	if (execpath_len != 0) {
 		destp -= execpath_len;
-		imgp->execpathp = (uintptr_t)destp;
-		error = copyout(imgp->execpath, destp, execpath_len);
+		imgp->execpathp = cheri_fromint(destp);
+		error = copyout(imgp->execpath, (void *)destp, execpath_len);
 		if (error != 0)
 			return(error);
 	}
@@ -668,8 +671,8 @@ freebsd64_copyout_strings(struct image_params *imgp, register_t **stack_base)
 	 */
 	arc4rand(canary, sizeof(canary), 0);
 	destp -= sizeof(canary);
-	imgp->canary = (uintptr_t)destp;
-	error = copyout(canary, destp, sizeof(canary));
+	imgp->canary = cheri_fromint(destp);
+	error = copyout(canary, (void *)destp, sizeof(canary));
 	if (error != 0)
 		return (error);
 	imgp->canarylen = sizeof(canary);
@@ -679,25 +682,32 @@ freebsd64_copyout_strings(struct image_params *imgp, register_t **stack_base)
 	 */
 	destp -= szps;
 	destp = __builtin_align_down(destp, sizeof(uint64_t));
-	imgp->pagesizes = (uintptr_t)destp;
-	error = copyout(pagesizes, destp, szps);
+	imgp->pagesizes = cheri_fromint(destp);
+	error = copyout(pagesizes, (void *)destp, szps);
 	if (error != 0)
 		return (error);
 	imgp->pagesizeslen = szps;
 
+	/*
+	 * Allocate room for the argument and environment strings.
+	 */
 	destp -= ARG_MAX - imgp->args->stringspace;
 	destp = __builtin_align_down(destp, sizeof(uint64_t));
+	ustringp = destp;
 
-	vectp = (uint64_t *)destp;
 	if (imgp->sysent->sv_stackgap != NULL)
-		imgp->sysent->sv_stackgap(imgp, (u_long *)&vectp);
+		imgp->sysent->sv_stackgap(imgp, &destp);
 
 	if (imgp->auxargs) {
-		error = imgp->sysent->sv_copyout_auxargs(imgp,
-		    (u_long *)&vectp);
-		if (error != 0)
-			return (error);
+		/*
+		 * Allocate room on the stack for the ELF auxargs
+		 * array.  It has up to AT_COUNT entries.
+		 */
+		destp -= AT_COUNT * sizeof(Elf64_Auxinfo);
+		destp = __builtin_align_down(destp, sizeof(uint64_t));
 	}
+
+	vectp = (uint64_t *)destp;
 
 	/*
 	 * Allocate room for the argv[] and env vectors including the
@@ -708,7 +718,9 @@ freebsd64_copyout_strings(struct image_params *imgp, register_t **stack_base)
 	/*
 	 * vectp also becomes our initial stack base
 	 */
-	*stack_base = (register_t *)vectp;
+	*stack_base = (uintcap_t)cheri_capability_build_user_data(
+	    CHERI_CAP_USER_DATA_PERMS, CHERI_CAP_USER_DATA_BASE,
+	    CHERI_CAP_USER_DATA_LENGTH, (uintptr_t)vectp);
 
 	stringp = imgp->args->begin_argv;
 	argc = imgp->args->argc;
@@ -717,13 +729,15 @@ freebsd64_copyout_strings(struct image_params *imgp, register_t **stack_base)
 	/*
 	 * Copy out strings - arguments and environment.
 	 */
-	error = copyout(stringp, destp, ARG_MAX - imgp->args->stringspace);
+	error = copyout(stringp, (void *)ustringp,
+	    ARG_MAX - imgp->args->stringspace);
 	if (error != 0)
 		return (error);
 
 	/*
 	 * Fill in "ps_strings" struct for ps, w, etc.
 	 */
+	imgp->argv = cheri_fromint((intptr_t)vectp);
 	if (suword(&arginfo->ps_argvstr, (uint64_t)(intptr_t)vectp) != 0 ||
 	    suword32(&arginfo->ps_nargvstr, argc) != 0)
 		return (EFAULT);
@@ -732,17 +746,18 @@ freebsd64_copyout_strings(struct image_params *imgp, register_t **stack_base)
 	 * Fill in argument portion of vector table.
 	 */
 	for (; argc > 0; --argc) {
-		if (suword(vectp++, (uint64_t)(intptr_t)destp) != 0)
+		if (suword(vectp++, ustringp) != 0)
 			return (EFAULT);
 		while (*stringp++ != 0)
-			destp++;
-		destp++;
+			ustringp++;
+		ustringp++;
 	}
 
 	/* a null vector table pointer separates the argp's from the envp's */
 	if (suword(vectp++, 0) != 0)
 		return (EFAULT);
 
+	imgp->envv = cheri_fromint((intptr_t)vectp);
 	if (suword(&arginfo->ps_envstr, (uint64_t)(intptr_t)vectp) != 0 ||
 	    suword32(&arginfo->ps_nenvstr, envc) != 0)
 		return (EFAULT);
@@ -751,16 +766,26 @@ freebsd64_copyout_strings(struct image_params *imgp, register_t **stack_base)
 	 * Fill in environment portion of vector table.
 	 */
 	for (; envc > 0; --envc) {
-		if (suword(vectp++, (uint64_t)(intptr_t)destp) != 0)
+		if (suword(vectp++, ustringp) != 0)
 			return (EFAULT);
 		while (*stringp++ != 0)
-			destp++;
-		destp++;
+			ustringp++;
+		ustringp++;
 	}
 
 	/* end of vector table is a null pointer */
 	if (suword(vectp, 0) != 0)
 		return (EFAULT);
+
+	if (imgp->auxargs) {
+		vectp++;
+		error = imgp->sysent->sv_copyout_auxargs(imgp,
+		    (uintcap_t)cheri_capability_build_user_data(
+			CHERI_CAP_USER_DATA_PERMS, (uintptr_t)vectp,
+			AT_COUNT * sizeof(Elf64_Auxinfo), 0));
+		if (error != 0)
+			return (error);
+	}
 
 	return (0);
 }

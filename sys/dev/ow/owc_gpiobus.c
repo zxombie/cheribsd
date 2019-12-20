@@ -1,6 +1,5 @@
 /*-
- * Copyright (c) 2015 M. Warner Losh <imp@freebsd.org>
- * All rights reserved.
+ * Copyright (c) 2015 M. Warner Losh <imp@FreeBSD.org>
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -132,9 +131,7 @@ owc_gpiobus_attach(device_t dev)
 		free(kids, M_TEMP);
 	if (nkid == 0)
 		device_add_child(dev, "ow", -1);
-	bus_generic_attach(dev);
-
-	return (0);
+	return (bus_delayed_attach_children(dev));
 }
 
 static int

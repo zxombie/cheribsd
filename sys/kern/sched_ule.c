@@ -72,7 +72,7 @@ __FBSDID("$FreeBSD$");
 
 #ifdef KDTRACE_HOOKS
 #include <sys/dtrace_bsd.h>
-int				dtrace_vtime_active;
+int __read_mostly		dtrace_vtime_active;
 dtrace_vtime_switch_func_t	dtrace_vtime_switch_func;
 #endif
 
@@ -206,23 +206,23 @@ _Static_assert(sizeof(struct thread) + sizeof(struct td_sched) <=
  * sched_slice:		Runtime of each thread before rescheduling.
  * preempt_thresh:	Priority threshold for preemption and remote IPIs.
  */
-static int sched_interact = SCHED_INTERACT_THRESH;
-static int tickincr = 8 << SCHED_TICK_SHIFT;
-static int realstathz = 127;	/* reset during boot. */
-static int sched_slice = 10;	/* reset during boot. */
-static int sched_slice_min = 1;	/* reset during boot. */
+static int __read_mostly sched_interact = SCHED_INTERACT_THRESH;
+static int __read_mostly tickincr = 8 << SCHED_TICK_SHIFT;
+static int __read_mostly realstathz = 127;	/* reset during boot. */
+static int __read_mostly sched_slice = 10;	/* reset during boot. */
+static int __read_mostly sched_slice_min = 1;	/* reset during boot. */
 #ifdef PREEMPTION
 #ifdef FULL_PREEMPTION
-static int preempt_thresh = PRI_MAX_IDLE;
+static int __read_mostly preempt_thresh = PRI_MAX_IDLE;
 #else
-static int preempt_thresh = PRI_MIN_KERN;
+static int __read_mostly preempt_thresh = PRI_MIN_KERN;
 #endif
 #else 
-static int preempt_thresh = 0;
+static int __read_mostly preempt_thresh = 0;
 #endif
-static int static_boost = PRI_MIN_BATCH;
-static int sched_idlespins = 10000;
-static int sched_idlespinthresh = -1;
+static int __read_mostly static_boost = PRI_MIN_BATCH;
+static int __read_mostly sched_idlespins = 10000;
+static int __read_mostly sched_idlespinthresh = -1;
 
 /*
  * tdq - per processor runqs and statistics.  All fields are protected by the
@@ -244,7 +244,7 @@ struct tdq {
 	volatile short	tdq_switchcnt;		/* Switches this tick. */
 	volatile short	tdq_oldswitchcnt;	/* Switches last tick. */
 	u_char		tdq_lowpri;		/* Lowest priority thread. */
-	u_char		tdq_ipipending;		/* IPI pending. */
+	u_char		tdq_owepreempt;		/* Remote preemption pending. */
 	u_char		tdq_idx;		/* Current insert index. */
 	u_char		tdq_ridx;		/* Current removal index. */
 	int		tdq_id;			/* cpuid. */
@@ -262,7 +262,7 @@ struct tdq {
 #define	TDQ_IDLE	2
 
 #ifdef SMP
-struct cpu_group *cpu_top;		/* CPU topology */
+struct cpu_group __read_mostly *cpu_top;		/* CPU topology */
 
 #define	SCHED_AFFINITY_DEFAULT	(max(1, hz / 1000))
 #define	SCHED_AFFINITY(ts, t)	((ts)->ts_rltick > ticks - ((t) * affinity))
@@ -272,16 +272,16 @@ struct cpu_group *cpu_top;		/* CPU topology */
  */
 static int rebalance = 1;
 static int balance_interval = 128;	/* Default set in sched_initticks(). */
-static int affinity;
-static int steal_idle = 1;
-static int steal_thresh = 2;
-static int always_steal = 0;
-static int trysteal_limit = 2;
+static int __read_mostly affinity;
+static int __read_mostly steal_idle = 1;
+static int __read_mostly steal_thresh = 2;
+static int __read_mostly always_steal = 0;
+static int __read_mostly trysteal_limit = 2;
 
 /*
  * One thread queue per processor.
  */
-static struct tdq	*balance_tdq;
+static struct tdq __read_mostly *balance_tdq;
 static int balance_ticks;
 DPCPU_DEFINE_STATIC(struct tdq, tdq);
 DPCPU_DEFINE_STATIC(uint32_t, randomval);
@@ -705,7 +705,7 @@ cpu_search(const struct cpu_group *cg, struct cpu_search *low,
 		if (match & CPU_SEARCH_HIGHEST)
 			hgroup.cs_cpu = -1;
 		if (child) {			/* Handle child CPU group. */
-			CPU_NAND(&cpumask, &child->cg_mask);
+			CPU_ANDNOT(&cpumask, &child->cg_mask);
 			switch (match) {
 			case CPU_SEARCH_LOWEST:
 				load = cpu_search_lowest(child, &lgroup);
@@ -1073,7 +1073,7 @@ tdq_notify(struct tdq *tdq, struct thread *td)
 	int pri;
 	int cpu;
 
-	if (tdq->tdq_ipipending)
+	if (tdq->tdq_owepreempt)
 		return;
 	cpu = td_get_sched(td)->ts_cpu;
 	pri = td->td_priority;
@@ -1096,7 +1096,12 @@ tdq_notify(struct tdq *tdq, struct thread *td)
 		if (!tdq->tdq_cpu_idle || cpu_idle_wakeup(cpu))
 			return;
 	}
-	tdq->tdq_ipipending = 1;
+
+	/*
+	 * The run queues have been updated, so any switch on the remote CPU
+	 * will satisfy the preemption request.
+	 */
+	tdq->tdq_owepreempt = 1;
 	ipi_cpu(cpu, IPI_PREEMPT);
 }
 
@@ -1463,7 +1468,7 @@ sched_setup(void *dummy)
 
 	/* Add thread0's load since it's running. */
 	TDQ_LOCK(tdq);
-	thread0.td_lock = TDQ_LOCKPTR(TDQ_SELF());
+	thread0.td_lock = TDQ_LOCKPTR(tdq);
 	tdq_load_add(tdq, &thread0);
 	tdq->tdq_lowpri = thread0.td_priority;
 	TDQ_UNLOCK(tdq);
@@ -2079,8 +2084,10 @@ sched_switch(struct thread *td, struct thread *newtd, int flags)
 	    (flags & SW_PREEMPT) != 0;
 	td->td_flags &= ~(TDF_NEEDRESCHED | TDF_SLICEEND);
 	td->td_owepreempt = 0;
+	tdq->tdq_owepreempt = 0;
 	if (!TD_IS_IDLETHREAD(td))
 		tdq->tdq_switchcnt++;
+
 	/*
 	 * The lock pointer in an idle thread should never change.  Reset it
 	 * to CAN_RUN as well.
@@ -2386,7 +2393,6 @@ sched_preempt(struct thread *td)
 	thread_lock(td);
 	tdq = TDQ_SELF();
 	TDQ_LOCK_ASSERT(tdq, MA_OWNED);
-	tdq->tdq_ipipending = 0;
 	if (td->td_priority > tdq->tdq_lowpri) {
 		int flags;
 
@@ -2397,6 +2403,8 @@ sched_preempt(struct thread *td)
 			mi_switch(flags | SWT_REMOTEWAKEIDLE, NULL);
 		else
 			mi_switch(flags | SWT_REMOTEPREEMPT, NULL);
+	} else {
+		tdq->tdq_owepreempt = 0;
 	}
 	thread_unlock(td);
 }
@@ -2421,7 +2429,7 @@ sched_userret_slowpath(struct thread *td)
  * threads.
  */
 void
-sched_clock(struct thread *td)
+sched_clock(struct thread *td, int cnt)
 {
 	struct tdq *tdq;
 	struct td_sched *ts;
@@ -2432,8 +2440,10 @@ sched_clock(struct thread *td)
 	/*
 	 * We run the long term load balancer infrequently on the first cpu.
 	 */
-	if (balance_tdq == tdq && smp_started != 0 && rebalance != 0) {
-		if (balance_ticks && --balance_ticks == 0)
+	if (balance_tdq == tdq && smp_started != 0 && rebalance != 0 &&
+	    balance_ticks != 0) {
+		balance_ticks -= cnt;
+		if (balance_ticks <= 0)
 			sched_balance();
 	}
 #endif
@@ -2455,14 +2465,15 @@ sched_clock(struct thread *td)
 	}
 	ts = td_get_sched(td);
 	sched_pctcpu_update(ts, 1);
-	if (td->td_pri_class & PRI_FIFO_BIT)
+	if ((td->td_pri_class & PRI_FIFO_BIT) || TD_IS_IDLETHREAD(td))
 		return;
+
 	if (PRI_BASE(td->td_pri_class) == PRI_TIMESHARE) {
 		/*
 		 * We used a tick; charge it to the thread so
 		 * that we can compute our interactivity.
 		 */
-		td_get_sched(td)->ts_runtime += tickincr;
+		td_get_sched(td)->ts_runtime += tickincr * cnt;
 		sched_interact_update(td);
 		sched_priority(td);
 	}
@@ -2471,7 +2482,8 @@ sched_clock(struct thread *td)
 	 * Force a context switch if the current thread has used up a full
 	 * time slice (default is 100ms).
 	 */
-	if (!TD_IS_IDLETHREAD(td) && ++ts->ts_slice >= tdq_slice(tdq)) {
+	ts->ts_slice += cnt;
+	if (ts->ts_slice >= tdq_slice(tdq)) {
 		ts->ts_slice = 0;
 		td->td_flags |= TDF_NEEDRESCHED | TDF_SLICEEND;
 	}
@@ -2913,6 +2925,7 @@ sched_throw(struct thread *td)
 		spinlock_exit();
 		PCPU_SET(switchtime, cpu_ticks());
 		PCPU_SET(switchticks, ticks);
+		PCPU_GET(idlethread)->td_lock = TDQ_LOCKPTR(tdq);
 	} else {
 		tdq = TDQ_SELF();
 		MPASS(td->td_lock == TDQ_LOCKPTR(tdq));
@@ -2943,8 +2956,6 @@ sched_fork_exit(struct thread *td)
 	 */
 	cpuid = PCPU_GET(cpuid);
 	tdq = TDQ_SELF();
-	if (TD_IS_IDLETHREAD(td))
-		td->td_lock = TDQ_LOCKPTR(tdq);
 	MPASS(td->td_lock == TDQ_LOCKPTR(tdq));
 	td->td_oncpu = cpuid;
 	TDQ_LOCK_ASSERT(tdq, MA_OWNED | MA_NOTRECURSED);

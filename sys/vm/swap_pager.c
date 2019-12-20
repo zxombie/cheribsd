@@ -729,7 +729,7 @@ swap_pager_dealloc(vm_object_t object)
 	 * Remove from list right away so lookups will fail if we block for
 	 * pageout completion.
 	 */
-	if (object->handle != NULL) {
+	if ((object->flags & OBJ_ANON) == 0 && object->handle != NULL) {
 		VM_OBJECT_WUNLOCK(object);
 		sx_xlock(&sw_alloc_sx);
 		TAILQ_REMOVE(NOBJLIST(object->handle), object,
@@ -1034,7 +1034,8 @@ swap_pager_copy(vm_object_t srcobject, vm_object_t dstobject,
 	 * If destroysource is set, we remove the source object from the
 	 * swap_pager internal queue now.
 	 */
-	if (destroysource && srcobject->handle != NULL) {
+	if (destroysource && (srcobject->flags & OBJ_ANON) == 0 &&
+	    srcobject->handle != NULL) {
 		vm_object_pip_add(srcobject, 1);
 		VM_OBJECT_WUNLOCK(srcobject);
 		vm_object_pip_add(dstobject, 1);
@@ -1713,7 +1714,7 @@ swp_pager_force_dirty(vm_page_t m)
 	vm_page_dirty(m);
 #ifdef INVARIANTS
 	vm_page_lock(m);
-	if (!vm_page_wired(m) && m->queue == PQ_NONE)
+	if (!vm_page_wired(m) && m->a.queue == PQ_NONE)
 		panic("page %p is neither wired nor queued", m);
 	vm_page_unlock(m);
 #endif
@@ -1993,7 +1994,10 @@ swp_pager_meta_build(vm_object_t object, vm_pindex_t pindex, daddr_t swapblk)
 
 		object->type = OBJT_SWAP;
 		object->un_pager.swp.writemappings = 0;
-		KASSERT(object->handle == NULL, ("default pager with handle"));
+		KASSERT((object->flags & OBJ_ANON) != 0 ||
+		    object->handle == NULL,
+		    ("default pager %p with handle %p",
+		    object, object->handle));
 	}
 
 	rdpi = rounddown(pindex, SWAP_META_PAGES);
@@ -3099,7 +3103,7 @@ swapongeom(struct vnode *vp)
 	int error;
 
 	vn_lock(vp, LK_EXCLUSIVE | LK_RETRY);
-	if (vp->v_type != VCHR || (vp->v_iflag & VI_DOOMED) != 0) {
+	if (vp->v_type != VCHR || VN_IS_DOOMED(vp)) {
 		error = ENOENT;
 	} else {
 		g_topology_lock();
