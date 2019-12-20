@@ -2689,16 +2689,16 @@ kern_proc_vmmap_out(struct proc *p, struct sbuf *sb, ssize_t maxlen,
 	 * at first.  Pass 1 instead of 0 for the first query base.
 	 */
 	if (startaddr <= 1) {
-		entry = map->header.next;
+		entry = vm_map_entry_first(map);
 	} else {
 		boolean_t in = vm_map_lookup_entry(map, startaddr, &entry);
 		if (!in) {
-			entry = entry->next;
+			entry = vm_map_entry_succ(entry);
 		}
 	}
 
 	for (i = 0; (entry != &map->header) && (n == 0 || i < n);
-	     entry = entry->next) {
+	     entry = vm_map_entry_succ(entry)) {
 		if (entry->eflags & MAP_ENTRY_IS_SUB_MAP)
 			continue;
 
