@@ -1462,10 +1462,10 @@ retry:
 				 * the expensive pmap_tc_capdirty.
 				 */
 				if ((mincoreinfo & MINCORE_MAYHAVECAP) != 0 ||
-					((m->aflags & PGA_CAPSTORED) != 0) ||
+					((m->a.flags & PGA_CAPSTORED) != 0) ||
 					((m->flags & VPO_PASTCAPSTORE) != 0) ||
 					pmap_tc_capdirty(m) ||
-					((m->aflags & PGA_CAPSTORED) != 0))
+					((m->a.flags & PGA_CAPSTORED) != 0))
 					mincoreinfo |= MINCORE_MAYHAVECAP;
 #endif
 			}
