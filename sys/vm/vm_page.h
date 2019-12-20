@@ -848,6 +848,7 @@ vm_page_aflag_set(vm_page_t m, uint16_t bits)
 	atomic_set_32(addr, val);
 }
 
+#if 0
 /*
  * Atomically read and clear some bits in a page's aflags field.  Unlike
  * vm_page_aflag_clear, this reports the contents of the aflags field before
@@ -869,6 +870,7 @@ vm_page_aflag_xclear_acq(vm_page_t m, uint16_t bits)
 
 	return (o >> VM_PAGE_AFLAG_SHIFT) & 0xFFFF;
 }
+#endif
 
 /*
  *	Atomically update the queue state of the page.  The operation fails if
