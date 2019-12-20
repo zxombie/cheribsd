@@ -923,9 +923,7 @@ static __inline void
 vm_page_capdirty(vm_page_t m)
 {
 #ifdef PGA_CAPSTORED
-	if ((m->aflags & PGA_CAPSTORED) == 0) {
-		vm_page_aflag_set(m, PGA_CAPSTORED);
-	}
+	vm_page_aflag_set(m, PGA_CAPSTORED);
 #else
 	(void)m;
 #endif
