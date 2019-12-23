@@ -174,10 +174,12 @@ make_code_pointer(const Elf_Sym *def, const struct Struct_Obj_Entry *defobj,
 		dbg_assert(defobj->cheri_captable_abi == DF_MIPS_CHERI_ABI_PCREL);
 	}
 	/* All code pointers should be sentries: */
+#ifdef notyet
 #if __has_builtin(__builtin_cheri_seal_entry)
 	ret = __builtin_cheri_seal_entry(ret);
 #else
 #warning "__builtin_cheri_seal_entry not supported, please update LLVM"
+#endif
 #endif
 	return __DECONST(dlfunc_t, ret);
 }
