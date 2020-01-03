@@ -265,7 +265,9 @@ struct caprevoke_stats {
 
 	uint32_t	caps_cleared;
 
-	uint32_t	__spare[4];
+	uint32_t	lines_scan;
+
+	uint32_t	__spare[3];
 };
 
 struct caprevoke_info {

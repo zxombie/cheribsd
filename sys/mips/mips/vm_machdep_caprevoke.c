@@ -214,6 +214,8 @@ vm_caprevoke_page_iter(const struct vm_caprevoke_cookie *crc,
 		       void * __capability * __capability mvu,
 		       vm_offset_t mve)
 {
+	CAPREVOKE_STATS_FOR(crst, crc);
+
 	int res = 0;
 	uint64_t tags, nexttags;
 
@@ -231,12 +233,19 @@ vm_caprevoke_page_iter(const struct vm_caprevoke_cookie *crc,
 #ifdef CHERI_CAPREVOKE_CLOADTAGS
 	tags = __builtin_cheri_cap_load_tags(mvu);
 
+#ifdef CHERI_CAPREVOKE_STATS
+	if (tags) {
+		CAPREVOKE_STATS_BUMP(crst, lines_scan);
+	}
+#endif
+
 	for( ; cheri_getaddress(mvu) < mve; mvu += _cloadtags_stride ) {
 		void * __capability * __capability mvt = mvu;
 
 		nexttags = __builtin_cheri_cap_load_tags(mvu + _cloadtags_stride);
 		if (nexttags != 0) {
 			CPREFETCH(mvu + _cloadtags_stride);
+			CAPREVOKE_STATS_BUMP(crst, lines_scan);
 		}
 
 		for(; tags != 0; (tags >>= 1), mvt += 1) {
@@ -262,12 +271,25 @@ vm_caprevoke_page_iter(const struct vm_caprevoke_cookie *crc,
 		}
 	}
 #else
-	for( ; cheri_getaddress(mvu) < mve; mvu++) {
-		void * __capability cut = *mvu;
-		if (cheri_gettag(cut)) {
-			if (cb(&res, crc, crshadow, ctp, mvt, *mvt))
-				goto out;
+	for( ; cheri_getaddress(mvu) < mve; mvu += 8) {
+#ifdef CHERI_CAPREVOKE_STATS
+		int seentag = 0;
+#endif
+		for (int i = 0; i < 8; i++) {
+			void * __capability cut = *mvu;
+			if (cheri_gettag(cut)) {
+#ifdef CHERI_CAPREVOKE_STATS
+				seentag++
+#endif
+				if (cb(&res, crc, crshadow, ctp, mvt, *mvt))
+					goto out;
+			}
 		}
+#ifdef CHERI_CAPREVOKE_STATS
+		if (seentag) {
+			CAPREVOKE_STATS_BUMP(crst, lines_scan);
+		}
+#endif
 	}
 #endif
 
