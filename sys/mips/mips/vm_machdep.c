@@ -71,7 +71,7 @@ __FBSDID("$FreeBSD$");
 #include <machine/pcb.h>
 #include <machine/tls.h>
 
-#ifdef CPU_CHERI
+#if __has_feature(capabilities)
 #include <cheri/cheri.h>
 #include <cheri/cheric.h>
 #endif
@@ -358,18 +358,17 @@ cpu_set_syscall_retval(struct thread *td, int error)
 		quad_syscall = 1;
 #endif
 
-	if (code == SYS_syscall)
-		code = locr0->a0;
-	else if (code == SYS___syscall) {
-		if (quad_syscall)
-			code = _QUAD_LOWWORD ? locr0->a1 : locr0->a0;
-		else
-			code = locr0->a0;
-	}
-
 	switch (error) {
 	case 0:
-		if (quad_syscall && code != SYS_lseek) {
+#if __has_feature(capabilities)
+		KASSERT(cheri_gettag((void * __capability)td->td_retval[0]) == 0 ||
+		    td->td_sa.code == SYS_mmap ||
+		    td->td_sa.code == SYS_shmat,
+		    ("trying to return capability from integer returning "
+		    "syscall (%u)", td->td_sa.code));
+#endif
+
+		if (quad_syscall && td->td_sa.code != SYS_lseek) {
 			/*
 			 * System call invoked through the
 			 * SYS___syscall interface but the
@@ -384,6 +383,11 @@ cpu_set_syscall_retval(struct thread *td, int error)
 			locr0->v0 = td->td_retval[0];
 			locr0->v1 = td->td_retval[1];
 			locr0->a3 = 0;
+#if __has_feature(capabilities)
+			if (SV_PROC_FLAG(td->td_proc, SV_CHERI))
+				locr0->c3 =
+				    (void * __capability)td->td_retval[0];
+#endif
 		}
 		break;
 
@@ -395,7 +399,7 @@ cpu_set_syscall_retval(struct thread *td, int error)
 		break;	/* nothing to do */
 
 	default:
-		if (quad_syscall && code != SYS_lseek) {
+		if (quad_syscall && td->td_sa.code != SYS_lseek) {
 			locr0->v0 = error;
 			if (_QUAD_LOWWORD)
 				locr0->v1 = error;
@@ -514,12 +518,13 @@ cpu_set_upcall(struct thread *td, void (*entry)(void *), void *arg,
 	tf = td->td_frame;
 	bzero(tf, sizeof(struct trapframe));
 	tf->sp = sp;
-	tf->pc = (register_t)(intptr_t)entry;
+	// FIXME: this is wrong for the purecap kernel
+	TRAPF_PC_SET_ADDR(tf, (vaddr_t)(intptr_t)entry);
 	/* 
 	 * MIPS ABI requires T9 to be the same as PC 
 	 * in subroutine entry point
 	 */
-	tf->t9 = (register_t)(intptr_t)entry; 
+	tf->t9 = (register_t)(__cheri_offset intptr_t)tf->pc;
 	tf->a0 = (register_t)(intptr_t)arg;
 
 	/*
@@ -581,28 +586,49 @@ swi_vm(void *dummy)
 }
 
 int
-cpu_set_user_tls(struct thread *td, void *tls_base)
+cpu_set_user_tls(struct thread *td, void * __capability tls_base)
 {
 
-#if defined(__mips_n64) && defined(COMPAT_FREEBSD32)
-	if (td->td_proc && SV_PROC_FLAG(td->td_proc, SV_ILP32))
-		td->td_md.md_tls_tcb_offset = TLS_TP_OFFSET + TLS_TCB_SIZE32;
+#ifdef COMPAT_FREEBSD32
+	if (SV_PROC_FLAG(td->td_proc, SV_ILP32))
+		td->td_md.md_tls_tcb_offset = TLS_TP_OFFSET32 + TLS_TCB_SIZE32;
 	else
 #endif
-#if defined (COMPAT_CHERIABI)
-	/*
-	 * XXX-AR: should cheriabi_set_user_tls just delegate to this
-	 * function?
-	 */
-	if (td->td_proc && SV_PROC_FLAG(td->td_proc, SV_CHERI))
-		panic("cpu_set_user_tls(%p) should not be called from CHERIABI\n", td);
+#ifdef COMPAT_FREEBSD64
+	if (!SV_PROC_FLAG(td->td_proc, SV_CHERI))
+		td->td_md.md_tls_tcb_offset = TLS_TP_OFFSET64 + TLS_TCB_SIZE64;
 	else
 #endif
-	td->td_md.md_tls_tcb_offset = TLS_TP_OFFSET + TLS_TCB_SIZE;
-	td->td_md.md_tls = __USER_CAP_UNBOUND(tls_base);
-	if (td == curthread && cpuinfo.userlocal_reg == true) {
-		mips_wr_userlocal((unsigned long)tls_base +
-		    td->td_md.md_tls_tcb_offset);
+		td->td_md.md_tls_tcb_offset = TLS_TP_OFFSET + TLS_TCB_SIZE;
+	td->td_md.md_tls = tls_base;
+	if (td == curthread) {
+		/*
+		 * If there is an user local register implementation (ULRI)
+		 * update it as well.  Add the TLS and TCB offsets so the
+		 * value in this register is adjusted like in the case of the
+		 * rdhwr trap() instruction handler.
+		 *
+		 * The user local register needs the TLS and TCB offsets
+		 * because the compiler simply generates a 'rdhwr reg, $29'
+		 * instruction to access thread local storage (i.e., variables
+		 * with the '_thread' attribute).
+		 */
+#if __has_feature(capabilities)
+		if (SV_PROC_FLAG(td->td_proc, SV_CHERI))
+			__asm __volatile ("cwritehwr %0, $chwr_userlocal"
+			    :
+			    : "C" ((char * __capability)td->td_md.md_tls +
+				td->td_md.md_tls_tcb_offset));
+#ifdef CHERIABI_LEGACY_SUPPORT
+#pragma message("Warning: Building with support for LEGACY TLS")
+#else
+		else
+#endif
+#endif
+		if (cpuinfo.userlocal_reg == true) {
+			mips_wr_userlocal((__cheri_addr u_long)tls_base +
+			    td->td_md.md_tls_tcb_offset);
+		}
 	}
 
 	return (0);
@@ -671,7 +697,9 @@ dump_trapframe(struct trapframe *trapframe)
 	DB_PRINT_REG(trapframe, mulhi);
 	DB_PRINT_REG(trapframe, badvaddr);
 	DB_PRINT_REG(trapframe, cause);
+#if !__has_feature(capabilities)
 	DB_PRINT_REG(trapframe, pc);
+#endif
 }
 
 DB_SHOW_COMMAND(pcb, ddb_dump_pcb)

@@ -59,6 +59,7 @@
 #include <sys/imgact.h>
 #include <sys/mman.h>
 #include <sys/syscall.h>
+#include <sys/sysargmap.h>
 #include <sys/syscallsubr.h>
 #include <sys/sysproto.h>
 #include <sys/ucontext.h>
@@ -68,6 +69,7 @@
 #include <cheri/cheric.h>
 
 #include <machine/cpuinfo.h>
+#include <machine/cheri_machdep.h>
 #include <machine/md_var.h>
 #include <machine/pcb.h>
 #include <machine/sigframe.h>
@@ -77,7 +79,6 @@
 #include <compat/cheriabi/cheriabi.h>
 #include <compat/cheriabi/cheriabi_proto.h>
 #include <compat/cheriabi/cheriabi_syscall.h>
-#include <compat/cheriabi/cheriabi_sysargmap.h>
 #include <compat/cheriabi/cheriabi_util.h>
 
 #include <vm/vm.h>
@@ -93,7 +94,6 @@
 static void	cheriabi_capability_set_user_ddc(void * __capability *,
 		    size_t);
 #endif
-static int	cheriabi_fetch_syscall_args(struct thread *td);
 static void	cheriabi_set_syscall_retval(struct thread *td, int error);
 static void	cheriabi_sendsig(sig_t, ksiginfo_t *, sigset_t *);
 static void	cheriabi_exec_setregs(struct thread *, struct image_params *,
@@ -123,11 +123,11 @@ struct sysentvec elf_freebsd_cheriabi_sysvec = {
 	.sv_stackprot	= VM_PROT_READ|VM_PROT_WRITE,
 	.sv_copyout_auxargs = __elfN(freebsd_copyout_auxargs),
 	.sv_copyout_strings = exec_copyout_strings,
-	.sv_setregs	= cheriabi_exec_setregs,
+	.sv_setregs	= exec_setregs,
 	.sv_fixlimit	= NULL,
 	.sv_maxssiz	= NULL,
 	.sv_flags	= SV_ABI_FREEBSD | SV_LP64 | SV_CHERI | SV_SHP,
-	.sv_set_syscall_retval = cheriabi_set_syscall_retval,
+	.sv_set_syscall_retval = cpu_set_syscall_retval,
 	.sv_fetch_syscall_args = cheriabi_fetch_syscall_args,
 	.sv_syscallnames = cheriabi_syscallnames,
 	.sv_shared_page_base = SHAREDPAGE,
@@ -200,7 +200,7 @@ cheriabi_elf_header_supported(struct image_params *imgp)
 	return FALSE;
 }
 
-static int
+int
 cheriabi_fetch_syscall_args(struct thread *td)
 {
 	struct trapframe *locr0 = td->td_frame;	 /* aka td->td_pcb->pcv_regs */
@@ -218,7 +218,7 @@ cheriabi_fetch_syscall_args(struct thread *td)
 	if (DELAYBRANCH(sa->trapframe->cause))	 /* Check BD bit */
 		locr0->pc = MipsEmulateBranch(locr0, sa->trapframe->pc, 0, 0);
 	else
-		locr0->pc += sizeof(int);
+		TRAPF_PC_INCREMENT(locr0, sizeof(int));
 
 	sa->code = locr0->v0;
 	sa->argoff = 0;
@@ -236,10 +236,10 @@ cheriabi_fetch_syscall_args(struct thread *td)
 
 	sa->narg = sa->callp->sy_narg;
 
-	if (sa->code >= nitems(cheriabi_sysargmask))
+	if (sa->code >= nitems(sysargmask))
 		ptrmask = 0;
 	else
-		ptrmask = cheriabi_sysargmask[sa->code];
+		ptrmask = sysargmask[sa->code];
 
 	/*
 	 * For syscall() and __syscall(), the arguments are stored in a
@@ -352,7 +352,7 @@ cheriabi_get_mcontext(struct thread *td, mcontext_c_t *mcp, int flags)
 		mcp->mc_cheriframe.cf_c3 = NULL;
 	}
 
-	mcp->mc_pc = td->td_frame->pc;
+	mcp->mc_pc = (__cheri_offset register_t)td->td_frame->pc;
 	mcp->mullo = td->td_frame->mullo;
 	mcp->mulhi = td->td_frame->mulhi;
 	mcp->mc_tls = td->td_md.md_tls;
@@ -378,7 +378,7 @@ cheriabi_set_mcontext(struct thread *td, mcontext_c_t *mcp)
 	if (mcp->mc_fpused)
 		bcopy((void *)&mcp->mc_fpregs, (void *)&td->td_frame->f0,
 		    sizeof(mcp->mc_fpregs));
-	td->td_frame->pc = mcp->mc_pc;
+	td->td_frame->pc = update_pcc_offset(mcp->mc_cheriframe.cf_pcc, mcp->mc_pc);
 	td->td_frame->mullo = mcp->mullo;
 	td->td_frame->mulhi = mcp->mulhi;
 
@@ -389,6 +389,25 @@ cheriabi_set_mcontext(struct thread *td, mcontext_c_t *mcp)
 
 	return (0);
 }
+
+/* Check that mcontext_c_t matches struct sigcontext) */
+#define	CHECK_SIGCTX_MCTX_OFFSET(mfield, sfield)	\
+    _Static_assert(offsetof(mcontext_c_t, mfield) == 	\
+	offsetof(struct sigcontext, sfield) -		\
+	offsetof(struct sigcontext, sc_onstack), "mcontext_c_t layout error")
+
+CHECK_SIGCTX_MCTX_OFFSET(mc_onstack, sc_onstack);
+CHECK_SIGCTX_MCTX_OFFSET(mc_pc, sc_pc);
+CHECK_SIGCTX_MCTX_OFFSET(sr, sr);
+CHECK_SIGCTX_MCTX_OFFSET(mullo, mullo);
+CHECK_SIGCTX_MCTX_OFFSET(mulhi, mulhi);
+CHECK_SIGCTX_MCTX_OFFSET(mc_fpused, sc_fpused);
+CHECK_SIGCTX_MCTX_OFFSET(mc_fpregs, sc_fpregs);
+/*
+ * mc_fpc_eir is the last field that matches (due to the following
+ * void* argument that is different for CheriABI.
+ */
+CHECK_SIGCTX_MCTX_OFFSET(mc_fpc_eir, sc_fpc_eir);
 
 /*
  * The CheriABI version of sendsig(9) largely borrows from the MIPS version,
@@ -500,7 +519,7 @@ cheriabi_sendsig(sig_t catcher, ksiginfo_t *ksi, sigset_t *mask)
 	sf.sf_uc.uc_stack = td->td_sigstk;
 #endif
 	sf.sf_uc.uc_mcontext.mc_onstack = (oonstack) ? 1 : 0;
-	sf.sf_uc.uc_mcontext.mc_pc = regs->pc;
+	sf.sf_uc.uc_mcontext.mc_pc = (__cheri_offset register_t)regs->pc;
 	sf.sf_uc.uc_mcontext.mullo = regs->mullo;
 	sf.sf_uc.uc_mcontext.mulhi = regs->mulhi;
 	sf.sf_uc.uc_mcontext.mc_tls = td->td_md.md_tls;
@@ -631,16 +650,10 @@ cheriabi_sendsig(sig_t catcher, ksiginfo_t *ksi, sigset_t *mask)
 	 * Install CHERI signal-delivery register state for handler to run
 	 * in.  As we don't install this in the CHERI frame on the user stack,
 	 * it will be (generally) be removed automatically on sigreturn().
-	 *
-	 * Note: regs->pc should currently be the same as the offset of pcc and
-	 * not the virtual address.
-	 * TODO: add an update_trapframe_pc(void* __kerncap) that guarantees
-	 * this invariant always holds.
 	 */
-	regs->pc = (__cheri_offset register_t)catcher;
-	regs->pcc = catcher;
+	regs->pc = (trapf_pc_t)catcher;
 	regs->csp = sfp;
-	regs->c12 = catcher;
+	regs->c12 = regs->pc;
 	regs->c17 = td->td_pcb->pcb_cherisignal.csig_sigcode;
 	/*
 	 * For now only change IDC if we were sandboxed. This makes cap-table
@@ -668,7 +681,7 @@ cheriabi_capability_set_user_ddc(void * __capability *cp, size_t length)
  * Common per-thread CHERI state initialisation across execve(2) and
  * additional thread creation.
  */
-static void
+void
 cheriabi_newthread_init(struct thread *td)
 {
 	struct cheri_signal *csigp;
@@ -778,7 +791,6 @@ cheriabi_exec_setregs(struct thread *td, struct image_params *imgp,
 	    CHERI_PERM_CHERIABI_VMMAP,
 	    ("%s: mmap() cap lacks CHERI_PERM_CHERIABI_VMMAP", __func__));
 
-	td->td_frame->pc = imgp->entry_addr;
 	td->td_frame->sr = MIPS_SR_KSU_USER | MIPS_SR_EXL | MIPS_SR_INT_IE |
 	    (mips_rd_status() & MIPS_SR_INT_MASK) |
 	    MIPS_SR_PX | MIPS_SR_UX | MIPS_SR_KX | MIPS_SR_COP_2_BIT;
@@ -837,8 +849,6 @@ cheriabi_exec_setregs(struct thread *td, struct image_params *imgp,
 	code_end = code_start + code_length;
 	frame->pcc = cheri_capability_build_user_code(CHERI_CAP_USER_CODE_PERMS,
 	    code_start, code_end - code_start, imgp->entry_addr - code_start);
-	/* Ensure that frame->pc is the offset of frame->pcc (needed for eret) */
-	frame->pc = cheri_getoffset(frame->pcc);
 	frame->c12 = frame->pcc;
 
 	/*
@@ -922,7 +932,6 @@ cheriabi_set_threadregs(struct thread *td, struct thr_param_c *param)
 	 * XXX-BD: cpu_copy_thread() copies the cheri_signal struct.  Do we
 	 * want to point it at our stack instead?
 	 */
-	frame->pc = cheri_getoffset(param->start_func);
 	frame->pcc = param->start_func;
 	frame->c12 = param->start_func;
 	frame->c3 = param->arg;
@@ -968,44 +977,6 @@ cheriabi_set_threadregs(struct thread *td, struct thr_param_c *param)
 }
 
 int
-cheriabi_set_user_tls(struct thread *td, void * __capability tls_base)
-{
-
-	td->td_md.md_tls_tcb_offset = TLS_TP_OFFSET_C + TLS_TCB_SIZE_C;
-	/* XXX-AR: add a TLS alignment check here */
-	td->td_md.md_tls = tls_base;
-	/* XXX-JC: only use cwritehwr */
-	if (curthread == td) {
-		__asm __volatile ("cwritehwr %0, $chwr_userlocal"
-				  :
-				  : "C" ((char * __capability)td->td_md.md_tls +
-				      td->td_md.md_tls_tcb_offset));
-	}
-#ifdef CHERIABI_LEGACY_SUPPORT
-#pragma message("Warning: Building with support for LEGACY TLS")
-	if (curthread == td && cpuinfo.userlocal_reg == true) {
-		/*
-		 * If there is an user local register implementation
-		 * (ULRI) update it as well.  Add the TLS and TCB
-		 * offsets so the value in this register is
-		 * adjusted like in the case of the rdhwr trap()
-		 * instruction handler.
-		 *
-		 * The user local register needs the TLS and TCB
-		 * offsets because the compiler simply generates a
-		 * 'rdhwr reg, $29' instruction to access thread local
-		 * storage (i.e., variables with the '_thread'
-		 * attribute).
-		 */
-		mips_wr_userlocal((__cheri_addr u_long)td->td_md.md_tls +
-		    td->td_md.md_tls_tcb_offset);
-	}
-#endif
-
-	return (0);
-}
-
-int
 cheriabi_sysarch(struct thread *td, struct cheriabi_sysarch_args *uap)
 {
 	int error;
@@ -1018,7 +989,7 @@ cheriabi_sysarch(struct thread *td, struct cheriabi_sysarch_args *uap)
 	 * Operations shared with MIPS.
 	 */
 	case MIPS_SET_TLS:
-		return (cheriabi_set_user_tls(td, uap->parms));
+		return (cpu_set_user_tls(td, uap->parms));
 
 	case MIPS_GET_TLS:
 		error = copyoutcap(&td->td_md.md_tls, uap->parms,

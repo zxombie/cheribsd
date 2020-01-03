@@ -80,12 +80,7 @@ static struct sysentvec elf_freebsd_sysvec = {
 	.sv_stackprot	= VM_PROT_READ | VM_PROT_WRITE,
 	.sv_copyout_auxargs = __elfN(freebsd_copyout_auxargs),
 	.sv_copyout_strings = exec_copyout_strings,
-/* XXX: TODO */
-#if 1
 	.sv_setregs	= exec_setregs,
-#else
-	.sv_setregs	= cheriabi_exec_setregs,
-#endif
 	.sv_fixlimit	= NULL,
 	.sv_maxssiz	= NULL,
 	.sv_flags	= SV_ABI_FREEBSD | SV_LP64 | SV_CHERI |
@@ -94,14 +89,8 @@ static struct sysentvec elf_freebsd_sysvec = {
 #else
 			    0,
 #endif
-/* XXX: TODO */
-#if 1
 	.sv_set_syscall_retval = cpu_set_syscall_retval,
-	.sv_fetch_syscall_args = cpu_fetch_syscall_args,
-#else
-	.sv_set_syscall_retval = cheriabi_set_syscall_retval,
 	.sv_fetch_syscall_args = cheriabi_fetch_syscall_args,
-#endif
 	.sv_syscallnames = syscallnames,
 #ifdef MIPS_SHAREDPAGE
 	.sv_shared_page_base = SHAREDPAGE,
