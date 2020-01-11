@@ -76,12 +76,7 @@ WANT_CHERI=	pure
 .else
 .error Unknown cheritest variant ${PROG}
 .endif
-<<<<<<< HEAD
 LIBADD+= 	z
-.endif
-=======
-LIBADD= 	z
->>>>>>> origin/master
 
 LIBADD+=	xo util
 
