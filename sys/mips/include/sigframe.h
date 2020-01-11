@@ -43,7 +43,11 @@ struct sigframe {
 	register_t	sf_siginfo;	/* code or pointer to sf_si */
 	register_t	sf_ucontext;	/* points to sf_uc */
 	register_t	sf_addr;	/* undocumented 4th arg */
+#if defined(_KERNEL) && __has_feature(capabilities)
+	ucontext_c_t	sf_uc;		/* = *sf_ucontext */
+#else
 	ucontext_t	sf_uc;		/* = *sf_ucontext */
+#endif
 #ifdef _KERNEL
 	struct siginfo_native sf_si;	/* = *sf_siginfo (SA_SIGINFO case) */
 #else
@@ -63,6 +67,18 @@ struct sigframe32 {
 	ucontext32_t	sf_uc;		/* = *sf_ucontext */
 	struct siginfo32	sf_si;	/* = *sf_siginfo (SA_SIGINFO case) */
 	uint32_t	__spare__[2];
+};
+#endif
+
+#ifdef COMPAT_FREEBSD64
+struct sigframe64 {
+	int64_t		sf_signum;
+	int64_t		sf_siginfo;	/* code or pointer to sf_si */
+	int64_t		sf_ucontext;	/* points to sf_uc */
+	int64_t		sf_addr;	/* undocumented 4th arg */
+	ucontext64_t	sf_uc;		/* = *sf_ucontext */
+	struct siginfo64 sf_si;	/* = *sf_siginfo (SA_SIGINFO case) */
+	uint64_t	__spare__[2];
 };
 #endif
 

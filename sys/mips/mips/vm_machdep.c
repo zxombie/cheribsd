@@ -170,16 +170,19 @@ cpu_fork(struct thread *td1, struct proc *p2, struct thread *td2, int flags)
 	td2->td_md.md_tls_tcb_offset = td1->td_md.md_tls_tcb_offset;
 	td2->td_md.md_saved_intr = MIPS_SR_INT_IE;
 	td2->td_md.md_spinlock_count = 1;
-#ifdef CPU_CHERI
-#ifdef COMPAT_CHERIABI
+#if __has_feature(capabilities)
 	td2->td_md.md_cheri_mmap_cap = td1->td_md.md_cheri_mmap_cap;
-#endif
+
 	/*
-	 * XXXRW: Ensure capability coprocessor is enabled for both kernel and
-	 * userspace in child.
+	 * XXXRW: Ensure capability coprocessor is enabled for the
+	 * kernel.  in child.  It should already be enabled for
+	 * userspace in the inherited trapframe for user processes.
+	 * Kernel processes don't use the trapframe.
 	 */
-	td2->td_frame->sr |= MIPS_SR_COP_2_BIT;
 	pcb2->pcb_context[PCB_REG_SR] |= MIPS_SR_COP_2_BIT;
+	if (td1 != &thread0)
+		KASSERT((td2->td_frame->sr & MIPS_SR_COP_2_BIT) != 0,
+		    ("%s: COP2 not enabled in trapframe", __func__));
 #endif
 #ifdef CPU_CNMIPS
 	if (td1->td_md.md_flags & MDTD_COP2USED) {
@@ -469,10 +472,8 @@ cpu_copy_thread(struct thread *td, struct thread *td0)
 
 #ifdef CPU_CHERI
 	/*
-	 * XXXRW: Interesting that we just set pcb_context here and not also
-	 * the trap frame.
-	 *
-	 * XXXRW: With CPU_CNMIPS parts moved, does this still belong here?
+	 * XXXRW: Only set the kernel context here.  The trapframe for
+	 * user threads is managed in cpu_set_upcall.
 	 */
 	pcb2->pcb_context[PCB_REG_SR] |= MIPS_SR_COP_2_BIT;
 #endif
@@ -486,7 +487,7 @@ cpu_copy_thread(struct thread *td, struct thread *td0)
 	/* Setup to release spin count in in fork_exit(). */
 	td->td_md.md_spinlock_count = 1;
 	td->td_md.md_saved_intr = MIPS_SR_INT_IE;
-#if defined(CPU_CHERI) && defined(COMPAT_CHERIABI)
+#if __has_feature(capabilities)
 	td->td_md.md_cheri_mmap_cap = td0->td_md.md_cheri_mmap_cap;
 #endif
 #if 0
@@ -535,7 +536,7 @@ cpu_set_upcall(struct thread *td, void (*entry)(void *), void *arg,
 	 * MIPS ABI requires T9 to be the same as PC 
 	 * in subroutine entry point
 	 */
-	tf->t9 = (register_t)(__cheri_offset intptr_t)tf->pc;
+	tf->t9 = TRAPF_PC_OFFSET(tf);
 	tf->a0 = (register_t)(intptr_t)arg;
 
 	/*
@@ -543,6 +544,11 @@ cpu_set_upcall(struct thread *td, void (*entry)(void *), void *arg,
 	 * Setup any other CPU-Specific registers (Not MIPS Standard)
 	 * that are needed.
 	 */
+
+#if __has_feature(capabilities)
+	KASSERT((tf->sr & MIPS_SR_COP_2_BIT) != 0,
+	    ("%s: COP2 not enabled in trapframe", __func__));
+#endif
 }
 
 bool

@@ -272,7 +272,7 @@ struct __mac_execve_args {
 	char	*fname;
 	char	**argv;
 	char	**envv;
-	struct mac_native	*mac_p;
+	struct mac	*mac_p;
 };
 #endif
 
@@ -390,8 +390,8 @@ do_execve(struct thread *td, struct image_args *args,
 	struct vnode *oldtextvp = NULL, *newtextvp;
 	int credential_changing;
 #ifdef MAC
-	kmac_t extmac;
-	kmac_t *mac_p;
+	struct mac extmac;
+	struct mac *mac_p;
 	struct label *interpvplabel = NULL;
 	int will_transition;
 #endif
@@ -549,7 +549,7 @@ interpret:
 	    (imgp->vp->v_mount->mnt_flag & MNT_NOSUID) == 0 &&
 	    (p->p_flag & P_TRACED) == 0) {
 		imgp->credential_setid = true;
-		VOP_UNLOCK(imgp->vp, 0);
+		VOP_UNLOCK(imgp->vp);
 		imgp->newcred = crdup(oldcred);
 		if (attr.va_mode & S_ISUID) {
 			euip = uifind(attr.va_uid);
@@ -582,7 +582,7 @@ interpret:
 		 */
 		if (oldcred->cr_svuid != oldcred->cr_uid ||
 		    oldcred->cr_svgid != oldcred->cr_gid) {
-			VOP_UNLOCK(imgp->vp, 0);
+			VOP_UNLOCK(imgp->vp);
 			imgp->newcred = crdup(oldcred);
 			vn_lock(imgp->vp, LK_SHARED | LK_RETRY);
 			change_svuid(imgp->newcred, imgp->newcred->cr_uid);
@@ -597,7 +597,7 @@ interpret:
 	if (args->fname != NULL && args->fname[0] == '/')
 		imgp->execpath = args->fname;
 	else {
-		VOP_UNLOCK(imgp->vp, 0);
+		VOP_UNLOCK(imgp->vp);
 		if (vn_fullpath(td, imgp->vp, &imgp->execpath,
 		    &imgp->freepath) != 0)
 			imgp->execpath = args->fname;
@@ -680,7 +680,7 @@ interpret:
 	 * NB: We unlock the vnode here because it is believed that none
 	 * of the sv_copyout_strings/sv_fixup operations require the vnode.
 	 */
-	VOP_UNLOCK(imgp->vp, 0);
+	VOP_UNLOCK(imgp->vp);
 
 	if (disallow_high_osrel &&
 	    P_OSREL_MAJOR(p->p_osrel) > P_OSREL_MAJOR(__FreeBSD_version)) {
@@ -813,7 +813,7 @@ interpret:
 		 * taking sleepable locks, so temporarily drop our locks.
 		 */
 		PROC_UNLOCK(p);
-		VOP_UNLOCK(imgp->vp, 0);
+		VOP_UNLOCK(imgp->vp);
 		fdsetugidsafety(td);
 		error = fdcheckstd(td);
 		vn_lock(imgp->vp, LK_SHARED | LK_RETRY);
@@ -884,7 +884,7 @@ interpret:
 	 * P_INEXEC flag is cleared.
 	 */
 	if (PMC_SYSTEM_SAMPLING_ACTIVE() || PMC_PROC_IS_USING_PMCS(p)) {
-		VOP_UNLOCK(imgp->vp, 0);
+		VOP_UNLOCK(imgp->vp);
 		pe.pm_credentialschanged = credential_changing;
 		pe.pm_entryaddr = imgp->entry_addr;
 
@@ -919,7 +919,7 @@ exec_fail_dealloc:
 		if (error != 0)
 			vput(imgp->vp);
 		else
-			VOP_UNLOCK(imgp->vp, 0);
+			VOP_UNLOCK(imgp->vp);
 	}
 
 	if (imgp->object != NULL)

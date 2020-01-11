@@ -179,7 +179,7 @@ systrace_args(int sysnum, void *params, uint64_t *uarg, int *n_args)
 	case 27: {
 		struct recvmsg_args *p = params;
 		iarg[0] = p->s; /* int */
-		uarg[1] = (intptr_t) p->msg; /* struct msghdr_native * __capability */
+		uarg[1] = (intptr_t) p->msg; /* struct msghdr * __capability */
 		iarg[2] = p->flags; /* int */
 		*n_args = 3;
 		break;
@@ -188,7 +188,7 @@ systrace_args(int sysnum, void *params, uint64_t *uarg, int *n_args)
 	case 28: {
 		struct sendmsg_args *p = params;
 		iarg[0] = p->s; /* int */
-		uarg[1] = (intptr_t) p->msg; /* const struct msghdr_native * __capability */
+		uarg[1] = (intptr_t) p->msg; /* const struct msghdr * __capability */
 		iarg[2] = p->flags; /* int */
 		*n_args = 3;
 		break;
@@ -538,7 +538,7 @@ systrace_args(int sysnum, void *params, uint64_t *uarg, int *n_args)
 		struct fcntl_args *p = params;
 		iarg[0] = p->fd; /* int */
 		iarg[1] = p->cmd; /* int */
-		uarg[2] = (intptr_t) p->arg; /* intptr_t */
+		uarg[2] = (intptr_t) p->arg; /* intcap_t */
 		*n_args = 3;
 		break;
 	}
@@ -654,7 +654,7 @@ systrace_args(int sysnum, void *params, uint64_t *uarg, int *n_args)
 	case 120: {
 		struct readv_args *p = params;
 		iarg[0] = p->fd; /* int */
-		uarg[1] = (intptr_t) p->iovp; /* struct iovec_native * __capability */
+		uarg[1] = (intptr_t) p->iovp; /* struct iovec * __capability */
 		uarg[2] = p->iovcnt; /* u_int */
 		*n_args = 3;
 		break;
@@ -663,7 +663,7 @@ systrace_args(int sysnum, void *params, uint64_t *uarg, int *n_args)
 	case 121: {
 		struct writev_args *p = params;
 		iarg[0] = p->fd; /* int */
-		uarg[1] = (intptr_t) p->iovp; /* struct iovec_native * __capability */
+		uarg[1] = (intptr_t) p->iovp; /* struct iovec * __capability */
 		uarg[2] = p->iovcnt; /* u_int */
 		*n_args = 3;
 		break;
@@ -864,10 +864,10 @@ systrace_args(int sysnum, void *params, uint64_t *uarg, int *n_args)
 	case 169: {
 		struct semsys_args *p = params;
 		iarg[0] = p->which; /* int */
-		uarg[1] = (intptr_t) p->a2; /* intptr_t */
-		uarg[2] = (intptr_t) p->a3; /* intptr_t */
-		uarg[3] = (intptr_t) p->a4; /* intptr_t */
-		uarg[4] = (intptr_t) p->a5; /* intptr_t */
+		uarg[1] = (intptr_t) p->a2; /* intcap_t */
+		uarg[2] = (intptr_t) p->a3; /* intcap_t */
+		uarg[3] = (intptr_t) p->a4; /* intcap_t */
+		uarg[4] = (intptr_t) p->a5; /* intcap_t */
 		*n_args = 5;
 		break;
 	}
@@ -875,11 +875,11 @@ systrace_args(int sysnum, void *params, uint64_t *uarg, int *n_args)
 	case 170: {
 		struct msgsys_args *p = params;
 		iarg[0] = p->which; /* int */
-		uarg[1] = (intptr_t) p->a2; /* intptr_t */
-		uarg[2] = (intptr_t) p->a3; /* intptr_t */
-		uarg[3] = (intptr_t) p->a4; /* intptr_t */
-		uarg[4] = (intptr_t) p->a5; /* intptr_t */
-		uarg[5] = (intptr_t) p->a6; /* intptr_t */
+		uarg[1] = (intptr_t) p->a2; /* intcap_t */
+		uarg[2] = (intptr_t) p->a3; /* intcap_t */
+		uarg[3] = (intptr_t) p->a4; /* intcap_t */
+		uarg[4] = (intptr_t) p->a5; /* intcap_t */
+		uarg[5] = (intptr_t) p->a6; /* intcap_t */
 		*n_args = 6;
 		break;
 	}
@@ -887,9 +887,9 @@ systrace_args(int sysnum, void *params, uint64_t *uarg, int *n_args)
 	case 171: {
 		struct shmsys_args *p = params;
 		iarg[0] = p->which; /* int */
-		uarg[1] = (intptr_t) p->a2; /* intptr_t */
-		uarg[2] = (intptr_t) p->a3; /* intptr_t */
-		uarg[3] = (intptr_t) p->a4; /* intptr_t */
+		uarg[1] = (intptr_t) p->a2; /* intcap_t */
+		uarg[2] = (intptr_t) p->a3; /* intcap_t */
+		uarg[3] = (intptr_t) p->a4; /* intcap_t */
 		*n_args = 4;
 		break;
 	}
@@ -1375,7 +1375,7 @@ systrace_args(int sysnum, void *params, uint64_t *uarg, int *n_args)
 	case 289: {
 		struct preadv_args *p = params;
 		iarg[0] = p->fd; /* int */
-		uarg[1] = (intptr_t) p->iovp; /* struct iovec_native * __capability */
+		uarg[1] = (intptr_t) p->iovp; /* struct iovec * __capability */
 		uarg[2] = p->iovcnt; /* u_int */
 		iarg[3] = p->offset; /* off_t */
 		*n_args = 4;
@@ -1385,7 +1385,7 @@ systrace_args(int sysnum, void *params, uint64_t *uarg, int *n_args)
 	case 290: {
 		struct pwritev_args *p = params;
 		iarg[0] = p->fd; /* int */
-		uarg[1] = (intptr_t) p->iovp; /* struct iovec_native * __capability */
+		uarg[1] = (intptr_t) p->iovp; /* struct iovec * __capability */
 		uarg[2] = p->iovcnt; /* u_int */
 		iarg[3] = p->offset; /* off_t */
 		*n_args = 4;
@@ -1891,7 +1891,7 @@ systrace_args(int sysnum, void *params, uint64_t *uarg, int *n_args)
 	/* nmount */
 	case 378: {
 		struct nmount_args *p = params;
-		uarg[0] = (intptr_t) p->iovp; /* struct iovec_native * __capability */
+		uarg[0] = (intptr_t) p->iovp; /* struct iovec * __capability */
 		uarg[1] = p->iovcnt; /* unsigned int */
 		iarg[2] = p->flags; /* int */
 		*n_args = 3;
@@ -1900,14 +1900,14 @@ systrace_args(int sysnum, void *params, uint64_t *uarg, int *n_args)
 	/* __mac_get_proc */
 	case 384: {
 		struct __mac_get_proc_args *p = params;
-		uarg[0] = (intptr_t) p->mac_p; /* struct mac_native * __capability */
+		uarg[0] = (intptr_t) p->mac_p; /* struct mac * __capability */
 		*n_args = 1;
 		break;
 	}
 	/* __mac_set_proc */
 	case 385: {
 		struct __mac_set_proc_args *p = params;
-		uarg[0] = (intptr_t) p->mac_p; /* struct mac_native * __capability */
+		uarg[0] = (intptr_t) p->mac_p; /* struct mac * __capability */
 		*n_args = 1;
 		break;
 	}
@@ -1915,7 +1915,7 @@ systrace_args(int sysnum, void *params, uint64_t *uarg, int *n_args)
 	case 386: {
 		struct __mac_get_fd_args *p = params;
 		iarg[0] = p->fd; /* int */
-		uarg[1] = (intptr_t) p->mac_p; /* struct mac_native * __capability */
+		uarg[1] = (intptr_t) p->mac_p; /* struct mac * __capability */
 		*n_args = 2;
 		break;
 	}
@@ -1923,7 +1923,7 @@ systrace_args(int sysnum, void *params, uint64_t *uarg, int *n_args)
 	case 387: {
 		struct __mac_get_file_args *p = params;
 		uarg[0] = (intptr_t) p->path_p; /* const char * __capability */
-		uarg[1] = (intptr_t) p->mac_p; /* struct mac_native * __capability */
+		uarg[1] = (intptr_t) p->mac_p; /* struct mac * __capability */
 		*n_args = 2;
 		break;
 	}
@@ -1931,7 +1931,7 @@ systrace_args(int sysnum, void *params, uint64_t *uarg, int *n_args)
 	case 388: {
 		struct __mac_set_fd_args *p = params;
 		iarg[0] = p->fd; /* int */
-		uarg[1] = (intptr_t) p->mac_p; /* struct mac_native * __capability */
+		uarg[1] = (intptr_t) p->mac_p; /* struct mac * __capability */
 		*n_args = 2;
 		break;
 	}
@@ -1939,7 +1939,7 @@ systrace_args(int sysnum, void *params, uint64_t *uarg, int *n_args)
 	case 389: {
 		struct __mac_set_file_args *p = params;
 		uarg[0] = (intptr_t) p->path_p; /* const char * __capability */
-		uarg[1] = (intptr_t) p->mac_p; /* struct mac_native * __capability */
+		uarg[1] = (intptr_t) p->mac_p; /* struct mac * __capability */
 		*n_args = 2;
 		break;
 	}
@@ -1976,7 +1976,7 @@ systrace_args(int sysnum, void *params, uint64_t *uarg, int *n_args)
 		iarg[1] = p->s; /* int */
 		iarg[2] = p->offset; /* off_t */
 		uarg[3] = p->nbytes; /* size_t */
-		uarg[4] = (intptr_t) p->hdtr; /* struct sf_hdtr_native * __capability */
+		uarg[4] = (intptr_t) p->hdtr; /* struct sf_hdtr * __capability */
 		uarg[5] = (intptr_t) p->sbytes; /* off_t * __capability */
 		iarg[6] = p->flags; /* int */
 		*n_args = 7;
@@ -2064,7 +2064,7 @@ systrace_args(int sysnum, void *params, uint64_t *uarg, int *n_args)
 	case 409: {
 		struct __mac_get_pid_args *p = params;
 		iarg[0] = p->pid; /* pid_t */
-		uarg[1] = (intptr_t) p->mac_p; /* struct mac_native * __capability */
+		uarg[1] = (intptr_t) p->mac_p; /* struct mac * __capability */
 		*n_args = 2;
 		break;
 	}
@@ -2072,7 +2072,7 @@ systrace_args(int sysnum, void *params, uint64_t *uarg, int *n_args)
 	case 410: {
 		struct __mac_get_link_args *p = params;
 		uarg[0] = (intptr_t) p->path_p; /* const char * __capability */
-		uarg[1] = (intptr_t) p->mac_p; /* struct mac_native * __capability */
+		uarg[1] = (intptr_t) p->mac_p; /* struct mac * __capability */
 		*n_args = 2;
 		break;
 	}
@@ -2080,7 +2080,7 @@ systrace_args(int sysnum, void *params, uint64_t *uarg, int *n_args)
 	case 411: {
 		struct __mac_set_link_args *p = params;
 		uarg[0] = (intptr_t) p->path_p; /* const char * __capability */
-		uarg[1] = (intptr_t) p->mac_p; /* struct mac_native * __capability */
+		uarg[1] = (intptr_t) p->mac_p; /* struct mac * __capability */
 		*n_args = 2;
 		break;
 	}
@@ -2121,7 +2121,7 @@ systrace_args(int sysnum, void *params, uint64_t *uarg, int *n_args)
 		uarg[0] = (intptr_t) p->fname; /* const char * __capability */
 		uarg[1] = (intptr_t) p->argv; /* char * __capability * __capability */
 		uarg[2] = (intptr_t) p->envv; /* char * __capability * __capability */
-		uarg[3] = (intptr_t) p->mac_p; /* struct mac_native * __capability */
+		uarg[3] = (intptr_t) p->mac_p; /* struct mac * __capability */
 		*n_args = 4;
 		break;
 	}
@@ -2522,7 +2522,7 @@ systrace_args(int sysnum, void *params, uint64_t *uarg, int *n_args)
 	case 473: {
 		struct sctp_generic_sendmsg_iov_args *p = params;
 		iarg[0] = p->sd; /* int */
-		uarg[1] = (intptr_t) p->iov; /* struct iovec_native * __capability */
+		uarg[1] = (intptr_t) p->iov; /* struct iovec * __capability */
 		iarg[2] = p->iovlen; /* int */
 		uarg[3] = (intptr_t) p->to; /* const struct sockaddr * __capability */
 		iarg[4] = p->tolen; /* __socklen_t */
@@ -2535,7 +2535,7 @@ systrace_args(int sysnum, void *params, uint64_t *uarg, int *n_args)
 	case 474: {
 		struct sctp_generic_recvmsg_args *p = params;
 		iarg[0] = p->sd; /* int */
-		uarg[1] = (intptr_t) p->iov; /* struct iovec_native * __capability */
+		uarg[1] = (intptr_t) p->iov; /* struct iovec * __capability */
 		iarg[2] = p->iovlen; /* int */
 		uarg[3] = (intptr_t) p->from; /* struct sockaddr * __capability */
 		uarg[4] = (intptr_t) p->fromlenaddr; /* __socklen_t * __capability */
@@ -2808,7 +2808,7 @@ systrace_args(int sysnum, void *params, uint64_t *uarg, int *n_args)
 	/* jail_get */
 	case 506: {
 		struct jail_get_args *p = params;
-		uarg[0] = (intptr_t) p->iovp; /* struct iovec_native * __capability */
+		uarg[0] = (intptr_t) p->iovp; /* struct iovec * __capability */
 		uarg[1] = p->iovcnt; /* unsigned int */
 		iarg[2] = p->flags; /* int */
 		*n_args = 3;
@@ -2817,7 +2817,7 @@ systrace_args(int sysnum, void *params, uint64_t *uarg, int *n_args)
 	/* jail_set */
 	case 507: {
 		struct jail_set_args *p = params;
-		uarg[0] = (intptr_t) p->iovp; /* struct iovec_native * __capability */
+		uarg[0] = (intptr_t) p->iovp; /* struct iovec * __capability */
 		uarg[1] = p->iovcnt; /* unsigned int */
 		iarg[2] = p->flags; /* int */
 		*n_args = 3;
@@ -3644,7 +3644,7 @@ systrace_entry_setargdesc(int sysnum, int ndx, char *desc, size_t descsz)
 			p = "int";
 			break;
 		case 1:
-			p = "userland struct msghdr_native * __capability";
+			p = "userland struct msghdr * __capability";
 			break;
 		case 2:
 			p = "int";
@@ -3660,7 +3660,7 @@ systrace_entry_setargdesc(int sysnum, int ndx, char *desc, size_t descsz)
 			p = "int";
 			break;
 		case 1:
-			p = "userland const struct msghdr_native * __capability";
+			p = "userland const struct msghdr * __capability";
 			break;
 		case 2:
 			p = "int";
@@ -4208,7 +4208,7 @@ systrace_entry_setargdesc(int sysnum, int ndx, char *desc, size_t descsz)
 			p = "int";
 			break;
 		case 2:
-			p = "intptr_t";
+			p = "intcap_t";
 			break;
 		default:
 			break;
@@ -4413,7 +4413,7 @@ systrace_entry_setargdesc(int sysnum, int ndx, char *desc, size_t descsz)
 			p = "int";
 			break;
 		case 1:
-			p = "userland struct iovec_native * __capability";
+			p = "userland struct iovec * __capability";
 			break;
 		case 2:
 			p = "u_int";
@@ -4429,7 +4429,7 @@ systrace_entry_setargdesc(int sysnum, int ndx, char *desc, size_t descsz)
 			p = "int";
 			break;
 		case 1:
-			p = "userland struct iovec_native * __capability";
+			p = "userland struct iovec * __capability";
 			break;
 		case 2:
 			p = "u_int";
@@ -4767,16 +4767,16 @@ systrace_entry_setargdesc(int sysnum, int ndx, char *desc, size_t descsz)
 			p = "int";
 			break;
 		case 1:
-			p = "intptr_t";
+			p = "intcap_t";
 			break;
 		case 2:
-			p = "intptr_t";
+			p = "intcap_t";
 			break;
 		case 3:
-			p = "intptr_t";
+			p = "intcap_t";
 			break;
 		case 4:
-			p = "intptr_t";
+			p = "intcap_t";
 			break;
 		default:
 			break;
@@ -4789,19 +4789,19 @@ systrace_entry_setargdesc(int sysnum, int ndx, char *desc, size_t descsz)
 			p = "int";
 			break;
 		case 1:
-			p = "intptr_t";
+			p = "intcap_t";
 			break;
 		case 2:
-			p = "intptr_t";
+			p = "intcap_t";
 			break;
 		case 3:
-			p = "intptr_t";
+			p = "intcap_t";
 			break;
 		case 4:
-			p = "intptr_t";
+			p = "intcap_t";
 			break;
 		case 5:
-			p = "intptr_t";
+			p = "intcap_t";
 			break;
 		default:
 			break;
@@ -4814,13 +4814,13 @@ systrace_entry_setargdesc(int sysnum, int ndx, char *desc, size_t descsz)
 			p = "int";
 			break;
 		case 1:
-			p = "intptr_t";
+			p = "intcap_t";
 			break;
 		case 2:
-			p = "intptr_t";
+			p = "intcap_t";
 			break;
 		case 3:
-			p = "intptr_t";
+			p = "intcap_t";
 			break;
 		default:
 			break;
@@ -5562,7 +5562,7 @@ systrace_entry_setargdesc(int sysnum, int ndx, char *desc, size_t descsz)
 			p = "int";
 			break;
 		case 1:
-			p = "userland struct iovec_native * __capability";
+			p = "userland struct iovec * __capability";
 			break;
 		case 2:
 			p = "u_int";
@@ -5581,7 +5581,7 @@ systrace_entry_setargdesc(int sysnum, int ndx, char *desc, size_t descsz)
 			p = "int";
 			break;
 		case 1:
-			p = "userland struct iovec_native * __capability";
+			p = "userland struct iovec * __capability";
 			break;
 		case 2:
 			p = "u_int";
@@ -6413,7 +6413,7 @@ systrace_entry_setargdesc(int sysnum, int ndx, char *desc, size_t descsz)
 	case 378:
 		switch(ndx) {
 		case 0:
-			p = "userland struct iovec_native * __capability";
+			p = "userland struct iovec * __capability";
 			break;
 		case 1:
 			p = "unsigned int";
@@ -6429,7 +6429,7 @@ systrace_entry_setargdesc(int sysnum, int ndx, char *desc, size_t descsz)
 	case 384:
 		switch(ndx) {
 		case 0:
-			p = "userland struct mac_native * __capability";
+			p = "userland struct mac * __capability";
 			break;
 		default:
 			break;
@@ -6439,7 +6439,7 @@ systrace_entry_setargdesc(int sysnum, int ndx, char *desc, size_t descsz)
 	case 385:
 		switch(ndx) {
 		case 0:
-			p = "userland struct mac_native * __capability";
+			p = "userland struct mac * __capability";
 			break;
 		default:
 			break;
@@ -6452,7 +6452,7 @@ systrace_entry_setargdesc(int sysnum, int ndx, char *desc, size_t descsz)
 			p = "int";
 			break;
 		case 1:
-			p = "userland struct mac_native * __capability";
+			p = "userland struct mac * __capability";
 			break;
 		default:
 			break;
@@ -6465,7 +6465,7 @@ systrace_entry_setargdesc(int sysnum, int ndx, char *desc, size_t descsz)
 			p = "userland const char * __capability";
 			break;
 		case 1:
-			p = "userland struct mac_native * __capability";
+			p = "userland struct mac * __capability";
 			break;
 		default:
 			break;
@@ -6478,7 +6478,7 @@ systrace_entry_setargdesc(int sysnum, int ndx, char *desc, size_t descsz)
 			p = "int";
 			break;
 		case 1:
-			p = "userland struct mac_native * __capability";
+			p = "userland struct mac * __capability";
 			break;
 		default:
 			break;
@@ -6491,7 +6491,7 @@ systrace_entry_setargdesc(int sysnum, int ndx, char *desc, size_t descsz)
 			p = "userland const char * __capability";
 			break;
 		case 1:
-			p = "userland struct mac_native * __capability";
+			p = "userland struct mac * __capability";
 			break;
 		default:
 			break;
@@ -6558,7 +6558,7 @@ systrace_entry_setargdesc(int sysnum, int ndx, char *desc, size_t descsz)
 			p = "size_t";
 			break;
 		case 4:
-			p = "userland struct sf_hdtr_native * __capability";
+			p = "userland struct sf_hdtr * __capability";
 			break;
 		case 5:
 			p = "userland off_t * __capability";
@@ -6701,7 +6701,7 @@ systrace_entry_setargdesc(int sysnum, int ndx, char *desc, size_t descsz)
 			p = "pid_t";
 			break;
 		case 1:
-			p = "userland struct mac_native * __capability";
+			p = "userland struct mac * __capability";
 			break;
 		default:
 			break;
@@ -6714,7 +6714,7 @@ systrace_entry_setargdesc(int sysnum, int ndx, char *desc, size_t descsz)
 			p = "userland const char * __capability";
 			break;
 		case 1:
-			p = "userland struct mac_native * __capability";
+			p = "userland struct mac * __capability";
 			break;
 		default:
 			break;
@@ -6727,7 +6727,7 @@ systrace_entry_setargdesc(int sysnum, int ndx, char *desc, size_t descsz)
 			p = "userland const char * __capability";
 			break;
 		case 1:
-			p = "userland struct mac_native * __capability";
+			p = "userland struct mac * __capability";
 			break;
 		default:
 			break;
@@ -6806,7 +6806,7 @@ systrace_entry_setargdesc(int sysnum, int ndx, char *desc, size_t descsz)
 			p = "userland char * __capability * __capability";
 			break;
 		case 3:
-			p = "userland struct mac_native * __capability";
+			p = "userland struct mac * __capability";
 			break;
 		default:
 			break;
@@ -7481,7 +7481,7 @@ systrace_entry_setargdesc(int sysnum, int ndx, char *desc, size_t descsz)
 			p = "int";
 			break;
 		case 1:
-			p = "userland struct iovec_native * __capability";
+			p = "userland struct iovec * __capability";
 			break;
 		case 2:
 			p = "int";
@@ -7509,7 +7509,7 @@ systrace_entry_setargdesc(int sysnum, int ndx, char *desc, size_t descsz)
 			p = "int";
 			break;
 		case 1:
-			p = "userland struct iovec_native * __capability";
+			p = "userland struct iovec * __capability";
 			break;
 		case 2:
 			p = "int";
@@ -8009,7 +8009,7 @@ systrace_entry_setargdesc(int sysnum, int ndx, char *desc, size_t descsz)
 	case 506:
 		switch(ndx) {
 		case 0:
-			p = "userland struct iovec_native * __capability";
+			p = "userland struct iovec * __capability";
 			break;
 		case 1:
 			p = "unsigned int";
@@ -8025,7 +8025,7 @@ systrace_entry_setargdesc(int sysnum, int ndx, char *desc, size_t descsz)
 	case 507:
 		switch(ndx) {
 		case 0:
-			p = "userland struct iovec_native * __capability";
+			p = "userland struct iovec * __capability";
 			break;
 		case 1:
 			p = "unsigned int";

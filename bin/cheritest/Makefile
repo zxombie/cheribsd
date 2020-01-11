@@ -1,5 +1,7 @@
 # $FreeBSD$
 
+.include <src.opts.mk>
+
 PROG?=	cheritest
 SRCS=	cheritest.c
 
@@ -85,6 +87,7 @@ CFLAGS+=	-DCHERI_DYNAMIC_TESTS
 .else
 NO_SHARED?=	YES
 # XXX-JC: Enable unconditionally once we have a dynamic libcheri
+.if ${MK_LIBCHERI} == "yes"
 CFLAGS+=	-DCHERI_LIBCHERI_TESTS
 LIBADD+=	cheri
 SRCS+=		cheritest_ccall.c					\
@@ -96,13 +99,16 @@ SRCS+=		cheritest_ccall.c					\
 		cheritest_libcheri_trustedstack.c			\
 		cheritest_libcheri_var.c
 .endif
+.endif
 
 .ifdef CHERITHREAD_TESTS
 LIBADD+=	pthread
 SRCS+=		cheritest_tls_threads.c
 # XXX-JC: Enable unconditionally once we have a dynamic libcheri
 .ifndef CHERI_DYNAMIC_TESTS
+.if ${MK_LIBCHERI} == "yes"
 SRCS+=		cheritest_libcheri_pthreads.c
+.endif
 .endif
 .endif
 

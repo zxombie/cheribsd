@@ -782,7 +782,11 @@ END(MipsSaveCurFPState)
  */
 	.globl	_C_LABEL(sigcode)
 _C_LABEL(sigcode):
+#if __has_feature(capabilities)
+	cincoffsetimm	$c3, $c11, SIGF_UC	# address of ucontext
+#else
 	PTR_ADDU	a0, sp, SIGF_UC		# address of ucontext
+#endif
 	li		v0, SYS_sigreturn
 # sigreturn (ucp)
 	syscall
@@ -799,7 +803,7 @@ szsigcode:
 #if defined(__mips_n64) && defined(COMPAT_FREEBSD64)
 	.globl	_C_LABEL(freebsd64_sigcode)
 _C_LABEL(freebsd64_sigcode):
-	PTR_ADDU	a0, sp, SIGF_UC		# address of ucontext
+	PTR_ADDU	a0, sp, SIGF64_UC		# address of ucontext
 	li		v0, SYS_sigreturn
 # sigreturn (ucp)
 	syscall
@@ -829,25 +833,6 @@ _C_LABEL(esigcode32):
 	.globl	szsigcode32
 szsigcode32:
 	.long	esigcode32-sigcode32
-	.text
-#endif
-
-#ifdef COMPAT_CHERIABI
-	.globl	_C_LABEL(cheri_sigcode)
-_C_LABEL(cheri_sigcode):
-	dli		t0, SIGF_C_UC
-	cincoffset	$c3, $c11, t0		# In the hybrid ABI named $c11,
-	li		v0, SYS_sigreturn	# but we really mean $csp.
-# sigreturn (ucp)
-	syscall
-	break	0				# just in case sigreturn fails
-	.globl	_C_LABEL(echeri_sigcode)
-_C_LABEL(echeri_sigcode):
-
-	.data
-	.globl	szcheri_sigcode
-szcheri_sigcode:
-	.long	echeri_sigcode-cheri_sigcode
 	.text
 #endif
 // CHERI CHANGES START

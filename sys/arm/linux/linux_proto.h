@@ -23,12 +23,21 @@ struct proc;
 
 struct thread;
 
-#define	PAD_(t)	(sizeof(register_t) <= sizeof(t) ? \
-		0 : sizeof(register_t) - sizeof(t))
+#define	PAD_(t)	(sizeof(syscallarg_t) <= sizeof(t) ? \
+		0 : sizeof(syscallarg_t) - sizeof(t))
 
 #if BYTE_ORDER == LITTLE_ENDIAN
 #define	PADL_(t)	0
 #define	PADR_(t)	PAD_(t)
+#elif defined(_MIPS_SZCAP) && _MIPS_SZCAP == 256
+/*
+ * For non-capability arguments, the syscall argument is stored in the
+ * cursor field in the second word.
+ */
+#define	PADL_(t)	(sizeof (t) > sizeof(register_t) ? \
+		0 : 2 * sizeof(register_t) - sizeof(t))
+#define	PADR_(t)	(sizeof (t) > sizeof(register_t) ? \
+		0 : 2 * sizeof(register_t))
 #else
 #define	PADL_(t)	PAD_(t)
 #define	PADR_(t)	0
@@ -1091,7 +1100,9 @@ struct linux_move_pages_args {
 	register_t dummy;
 };
 struct linux_getcpu_args {
-	register_t dummy;
+	char cpu_l_[PADL_(l_uint *)]; l_uint * cpu; char cpu_r_[PADR_(l_uint *)];
+	char node_l_[PADL_(l_uint *)]; l_uint * node; char node_r_[PADR_(l_uint *)];
+	char cache_l_[PADL_(void *)]; void * cache; char cache_r_[PADR_(void *)];
 };
 struct linux_epoll_pwait_args {
 	char epfd_l_[PADL_(l_int)]; l_int epfd; char epfd_r_[PADR_(l_int)];

@@ -62,6 +62,7 @@ local config = {
 	abi_flags = "",
 	abi_flags_mask = 0,
 	abi_headers = "",
+	abi_intptr_t = "intptr_t",
 	ptr_intptr_t_cast = "intptr_t",
 	ptr_qualified="*",
 	ptrmaskname = "sysargmask",
@@ -430,9 +431,11 @@ local function write_line_pfile(tmppat, line)
 	end
 end
 
+-- Check both literal intptr_t and the abi version because this needs
+-- to work both before and after the substitution
 local function isptrtype(type)
 	return type:find("*") or type:find("caddr_t") or
-	    type:find("intptr_t")
+	    type:find("intptr_t") or type:find(config['abi_intptr_t'])
 end
 
 local process_syscall_def
@@ -623,6 +626,8 @@ local function process_args(args)
 			goto out
 		end
 
+		argtype = argtype:gsub("intptr_t", config["abi_intptr_t"])
+
 		-- XX TODO: Forward declarations? See: sysstubfwd in CheriBSD
 		if abi_change then
 			local abi_type_suffix = config["abi_type_suffix"]
@@ -752,7 +757,7 @@ local function handle_noncompat(sysnum, thr_flag, flags, sysflags, rettype,
 	local daflags = get_mask({"NOPROTO", "NODEF"})
 	if flags & daflags == 0 then
 		write_line("sysargmap", string.format("\t[%s%s] = (0x0",
-		    config["syscallprefix"], funcname))
+		    config["syscallprefix"], funcalias))
 		local i = 0
 		for _, v in ipairs(funcargs) do
 			if isptrtype(v["type"]) then
@@ -1288,7 +1293,7 @@ for _, v in pairs(compat_options) do
 end
 
 write_line("sysargmap", string.format([[/*
- * System call prototypes.
+ * System call argument map.
  *
  * DO NOT EDIT-- this file is automatically %s.
  * $%s$
@@ -1420,7 +1425,11 @@ write_line("systraceret", [[
 ]])
 
 -- Finish up; output
-write_line("sysargmap", "};\n")
+write_line("sysargmap", string.format([[
+};
+
+#endif /* !%s */
+]], config["sysargmap_h"]))
 
 write_line("syssw", read_file("sysinc"))
 write_line("syssw", read_file("sysent"))
