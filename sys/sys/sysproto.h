@@ -649,7 +649,7 @@ struct clock_getres_args {
 };
 struct ktimer_create_args {
 	char clock_id_l_[PADL_(clockid_t)]; clockid_t clock_id; char clock_id_r_[PADR_(clockid_t)];
-	char evp_l_[PADL_(struct sigevent_native * __capability)]; struct sigevent_native * __capability evp; char evp_r_[PADR_(struct sigevent_native * __capability)];
+	char evp_l_[PADL_(struct sigevent * __capability)]; struct sigevent * __capability evp; char evp_r_[PADR_(struct sigevent * __capability)];
 	char timerid_l_[PADL_(int * __capability)]; int * __capability timerid; char timerid_r_[PADR_(int * __capability)];
 };
 struct ktimer_delete_args {
@@ -721,7 +721,7 @@ struct lio_listio_args {
 	char mode_l_[PADL_(int)]; int mode; char mode_r_[PADR_(int)];
 	char acb_list_l_[PADL_(struct aiocb_native * __capability const * __capability)]; struct aiocb_native * __capability const * __capability acb_list; char acb_list_r_[PADR_(struct aiocb_native * __capability const * __capability)];
 	char nent_l_[PADL_(int)]; int nent; char nent_r_[PADR_(int)];
-	char sig_l_[PADL_(struct sigevent_native * __capability)]; struct sigevent_native * __capability sig; char sig_r_[PADR_(struct sigevent_native * __capability)];
+	char sig_l_[PADL_(struct sigevent * __capability)]; struct sigevent * __capability sig; char sig_r_[PADR_(struct sigevent * __capability)];
 };
 struct kbounce_args {
 	char src_l_[PADL_(const void * __capability)]; const void * __capability src; char src_r_[PADR_(const void * __capability)];
@@ -900,12 +900,12 @@ struct sigpending_args {
 };
 struct sigtimedwait_args {
 	char set_l_[PADL_(const sigset_t * __capability)]; const sigset_t * __capability set; char set_r_[PADR_(const sigset_t * __capability)];
-	char info_l_[PADL_(struct siginfo_native * __capability)]; struct siginfo_native * __capability info; char info_r_[PADR_(struct siginfo_native * __capability)];
+	char info_l_[PADL_(struct siginfo * __capability)]; struct siginfo * __capability info; char info_r_[PADR_(struct siginfo * __capability)];
 	char timeout_l_[PADL_(const struct timespec * __capability)]; const struct timespec * __capability timeout; char timeout_r_[PADR_(const struct timespec * __capability)];
 };
 struct sigwaitinfo_args {
 	char set_l_[PADL_(const sigset_t * __capability)]; const sigset_t * __capability set; char set_r_[PADR_(const sigset_t * __capability)];
-	char info_l_[PADL_(struct siginfo_native * __capability)]; struct siginfo_native * __capability info; char info_r_[PADR_(struct siginfo_native * __capability)];
+	char info_l_[PADL_(struct siginfo * __capability)]; struct siginfo * __capability info; char info_r_[PADR_(struct siginfo * __capability)];
 };
 struct __acl_get_file_args {
 	char path_l_[PADL_(const char * __capability)]; const char * __capability path; char path_r_[PADR_(const char * __capability)];
@@ -1317,7 +1317,7 @@ struct kmq_timedsend_args {
 };
 struct kmq_notify_args {
 	char mqd_l_[PADL_(int)]; int mqd; char mqd_r_[PADR_(int)];
-	char sigev_l_[PADL_(const struct sigevent_native * __capability)]; const struct sigevent_native * __capability sigev; char sigev_r_[PADR_(const struct sigevent_native * __capability)];
+	char sigev_l_[PADL_(const struct sigevent * __capability)]; const struct sigevent * __capability sigev; char sigev_r_[PADR_(const struct sigevent * __capability)];
 };
 struct kmq_unlink_args {
 	char path_l_[PADL_(const char * __capability)]; const char * __capability path; char path_r_[PADR_(const char * __capability)];
@@ -1641,7 +1641,7 @@ struct wait6_args {
 	char status_l_[PADL_(int * __capability)]; int * __capability status; char status_r_[PADR_(int * __capability)];
 	char options_l_[PADL_(int)]; int options; char options_r_[PADR_(int)];
 	char wrusage_l_[PADL_(struct __wrusage * __capability)]; struct __wrusage * __capability wrusage; char wrusage_r_[PADR_(struct __wrusage * __capability)];
-	char info_l_[PADL_(struct siginfo_native * __capability)]; struct siginfo_native * __capability info; char info_r_[PADR_(struct siginfo_native * __capability)];
+	char info_l_[PADL_(struct siginfo * __capability)]; struct siginfo * __capability info; char info_r_[PADR_(struct siginfo * __capability)];
 };
 struct cap_rights_limit_args {
 	char fd_l_[PADL_(int)]; int fd; char fd_r_[PADR_(int)];

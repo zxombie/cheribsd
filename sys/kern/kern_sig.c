@@ -292,46 +292,6 @@ ksiginfo_tryfree(ksiginfo_t *ksi)
 }
 
 void
-siginfo_to_siginfo_native(const _siginfo_t *si,
-    struct siginfo_native *si_n)
-{
-
-#if !__has_feature(capabilities)
-	memcpy(si_n, si, sizeof(*si_n));
-#else
-	si_n->si_signo = si->si_signo;
-	si_n->si_errno = si->si_errno;
-	si_n->si_code = si->si_code;
-	si_n->si_pid = si->si_pid;
-	si_n->si_uid = si->si_uid;
-	si_n->si_status = si->si_status;
-	si_n->si_addr = (__cheri_fromcap void *)si->si_addr;
-	si_n->si_value.sival_ptr_native = si->si_value.sival_ptr_native;
-	memcpy(&si_n->_reason, &si->_reason, sizeof(si_n->_reason));
-#endif
-}
-
-void
-siginfo_native_to_siginfo(const struct siginfo_native *si_n,
-    _siginfo_t *si)
-{
-
-#if !__has_feature(capabilities)
-	memcpy(si, si_n, sizeof(*si_n));
-#else
-	si->si_signo = si_n->si_signo;
-	si->si_errno = si_n->si_errno;
-	si->si_code = si_n->si_code;
-	si->si_pid = si_n->si_pid;
-	si->si_uid = si_n->si_uid;
-	si->si_status = si_n->si_status;
-	si->si_addr = (__cheri_tocap void * __capability)si_n->si_addr;
-	si->si_value.sival_ptr_native = si_n->si_value.sival_ptr_native;
-	memcpy(&si->_reason, &si_n->_reason, sizeof(si_n->_reason));
-#endif
-}
-
-void
 sigqueue_init(sigqueue_t *list, struct proc *p)
 {
 	SIGEMPTYSET(list->sq_signals);
@@ -1243,13 +1203,11 @@ user_sigwait(struct thread *td, const sigset_t * __capability uset,
 	return (0);
 }
 
-int
-copyout_siginfo_native(const _siginfo_t *si, void * __capability info)
+static int
+copyout_siginfo(const siginfo_t *si, void * __capability info)
 {
-	struct siginfo_native si_n;
 
-	siginfo_to_siginfo_native(si, &si_n);
-	return (copyout_c(&si_n, info, sizeof(si_n)));
+	return (copyoutcap(si, info, sizeof(*si)));
 }
 
 int
@@ -1257,7 +1215,7 @@ sys_sigtimedwait(struct thread *td, struct sigtimedwait_args *uap)
 {
 
 	return (user_sigtimedwait(td, uap->set, uap->info, uap->timeout,
-	    (copyout_siginfo_t *)copyout_siginfo_native));
+	    copyout_siginfo));
 }
 
 int
@@ -1300,8 +1258,7 @@ int
 sys_sigwaitinfo(struct thread *td, struct sigwaitinfo_args *uap)
 {
 
-	return (user_sigwaitinfo(td, uap->set, uap->info,
-	    (copyout_siginfo_t *)copyout_siginfo_native));
+	return (user_sigwaitinfo(td, uap->set, uap->info, copyout_siginfo));
 }
 
 int
@@ -1329,7 +1286,7 @@ user_sigwaitinfo(struct thread *td, const sigset_t * __capability uset,
 }
 
 static void
-proc_td_siginfo_capture(struct thread *td, _siginfo_t *si)
+proc_td_siginfo_capture(struct thread *td, siginfo_t *si)
 {
 	struct thread *thr;
 
@@ -2013,21 +1970,35 @@ struct sigqueue_args {
 int
 sys_sigqueue(struct thread *td, struct sigqueue_args *uap)
 {
-	ksigval_union sv;
-
-	memset(&sv, 0, sizeof(sv));
+	union sigval sv;
 #if __has_feature(capabilities)
-	sv.sival_ptr_c = uap->value;
-#else
-	sv.sival_ptr_native = uap->value;
+	union sigval sv2;
 #endif
 
-	return (kern_sigqueue(td, uap->pid, uap->signum, &sv, 0));
+	sv.sival_ptr = uap->value;
+#if __has_feature(capabilities)
+	if (uap->pid != td->td_proc->p_pid) {
+		/*
+		 * Cowardly refuse to send capabilities to other
+		 * processes.
+		 *
+		 * XXX-BD: allow untagged capablities between
+		 * CheriABI processess? (Would have to happen in
+		 * delivery code to avoid a race).
+		 */
+		if (cheri_gettag(uap->value))
+			return (EPROT);
+		memset(&sv2, 0, sizeof(sv2));
+		sv2.sival_int = sv.sival_int;
+		sv = sv2;
+	}
+#endif
+
+	return (kern_sigqueue(td, uap->pid, uap->signum, &sv));
 }
 
 int
-kern_sigqueue(struct thread *td, pid_t pid, int signum, ksigval_union *value,
-    int flags)
+kern_sigqueue(struct thread *td, pid_t pid, int signum, union sigval *value)
 {
 	ksiginfo_t ksi;
 	struct proc *p;
@@ -2048,23 +2019,12 @@ kern_sigqueue(struct thread *td, pid_t pid, int signum, ksigval_union *value,
 	error = p_cansignal(td, p, signum);
 	if (error == 0 && signum != 0) {
 		ksiginfo_init(&ksi);
-		ksi.ksi_flags = KSI_SIGQ | flags;
+		ksi.ksi_flags = KSI_SIGQ;
 		ksi.ksi_signo = signum;
 		ksi.ksi_code = SI_QUEUE;
 		ksi.ksi_pid = td->td_proc->p_pid;
 		ksi.ksi_uid = td->td_ucred->cr_ruid;
-		memset(&ksi.ksi_value, 0, sizeof(ksi.ksi_value));
-#ifdef COMPAT_FREEBSD32
-		if (SV_PROC_FLAG(td->td_proc, SV_ILP32))
-			ksi.ksi_value.sival_ptr32 = value->sival_ptr32;
-		else
-#endif
-#ifdef COMPAT_CHERIABI
-		if (SV_PROC_FLAG(td->td_proc, SV_CHERI))
-			ksi.ksi_value.sival_ptr_c = value->sival_ptr_c;
-		else
-#endif
-			ksi.ksi_value.sival_ptr_native = value->sival_ptr_native;
+		ksi.ksi_value = *value;
 		error = pksignal(p, ksi.ksi_signo, &ksi);
 	}
 	PROC_UNLOCK(p);
@@ -2251,7 +2211,7 @@ pksignal(struct proc *p, int sig, ksiginfo_t *ksi)
 
 /* Utility function for finding a thread to send signal event to. */
 int
-sigev_findtd(struct proc *p, ksigevent_t *sigev, struct thread **ttd)
+sigev_findtd(struct proc *p, struct sigevent *sigev, struct thread **ttd)
 {
 	struct thread *td;
 

@@ -201,7 +201,7 @@ freebsd32_wait6(struct thread *td, struct freebsd32_wait6_args *uap)
 	struct wrusage32 wru32;
 	struct __wrusage wru, *wrup;
 	struct siginfo32 si32;
-	_siginfo_t si, *sip;
+	siginfo_t si, *sip;
 	int error, status;
 
 	if (uap->wrusage != NULL)
@@ -2575,7 +2575,7 @@ int freebsd32_ktimer_create(struct thread *td,
     struct freebsd32_ktimer_create_args *uap)
 {
 	struct sigevent32 ev32;
-	ksigevent_t ev, *evp;
+	struct sigevent ev, *evp;
 	int error, id;
 
 	if (uap->evp == NULL) {
@@ -2704,7 +2704,7 @@ freebsd32_thr_suspend(struct thread *td, struct freebsd32_thr_suspend_args *uap)
 }
 
 void
-siginfo_to_siginfo32(const _siginfo_t *src, struct siginfo32 *dst)
+siginfo_to_siginfo32(const siginfo_t *src, struct siginfo32 *dst)
 {
 	bzero(dst, sizeof(*dst));
 	dst->si_signo = src->si_signo;
@@ -2720,7 +2720,7 @@ siginfo_to_siginfo32(const _siginfo_t *src, struct siginfo32 *dst)
 }
 
 static int
-freebsd32_copyout_siginfo(const _siginfo_t *si, void * __capability info)
+freebsd32_copyout_siginfo(const siginfo_t *si, void * __capability info)
 {
 	struct siginfo32 si32;
 
@@ -2739,7 +2739,7 @@ struct freebsd32_sigqueue_args {
 int
 freebsd32_sigqueue(struct thread *td, struct freebsd32_sigqueue_args *uap)
 {
-	ksigval_union sv;
+	union sigval sv;
 
 	/*
 	 * On 32-bit ABIs, sival_int and sival_ptr are the same.
@@ -2752,7 +2752,7 @@ freebsd32_sigqueue(struct thread *td, struct freebsd32_sigqueue_args *uap)
 	bzero(&sv, sizeof(sv));
 	sv.sival_int = uap->value;
 
-	return (kern_sigqueue(td, uap->pid, uap->signum, &sv, 0));
+	return (kern_sigqueue(td, uap->pid, uap->signum, &sv));
 }
 
 int
@@ -3146,7 +3146,7 @@ freebsd32_posix_fadvise(struct thread *td,
 }
 
 int
-convert_sigevent32(struct sigevent32 *sig32, ksigevent_t *sig)
+convert_sigevent32(struct sigevent32 *sig32, struct sigevent *sig)
 {
 
 	CP(*sig32, *sig, sigev_notify);
@@ -3159,15 +3159,15 @@ convert_sigevent32(struct sigevent32 *sig32, ksigevent_t *sig)
 	case SIGEV_SIGNAL:
 		CP(*sig32, *sig, sigev_signo);
 		memset(&sig->sigev_value, 0, sizeof(sig->sigev_value));
-		sig->sigev_value.sival_ptr32 =
-		    sig32->sigev_value.sival_ptr;
+		sig->sigev_value.sival_int =
+		    sig32->sigev_value.sival_int;
 		break;
 	case SIGEV_KEVENT:
 		CP(*sig32, *sig, sigev_notify_kqueue);
 		CP(*sig32, *sig, sigev_notify_kevent_flags);
 		memset(&sig->sigev_value, 0, sizeof(sig->sigev_value));
-		sig->sigev_value.sival_ptr32 =
-		    sig32->sigev_value.sival_ptr;
+		sig->sigev_value.sival_int =
+		    sig32->sigev_value.sival_int;
 		break;
 	default:
 		return (EINVAL);

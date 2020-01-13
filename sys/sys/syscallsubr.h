@@ -473,7 +473,7 @@ int	kern_sigsuspend(struct thread *td, sigset_t mask);
 int	kern_sigtimedwait(struct thread *td, sigset_t waitset,
 	    struct ksiginfo *ksi, struct timespec *timeout);
 int	kern_sigqueue(struct thread *td, pid_t pid, int signum,
-	    ksigval_union *value, int flags);
+	    union sigval *value);
 int	kern_socket(struct thread *td, int domain, int type, int protocol);
 int	kern_statat(struct thread *td, int flag, int fd,
 	    const char * __capability path,
@@ -491,7 +491,7 @@ int	kern_sysctl(struct thread *td, int * __capability uname,
 	    void * __capability old, size_t * __capability oldlenp,
 	    const void * __capability new, size_t newlen, int flags);
 int	kern_ktimer_create(struct thread *td, clockid_t clock_id,
-	    ksigevent_t *evp, int *timerid, int preset_id);
+	    struct sigevent *evp, int *timerid, int preset_id);
 int	kern_ktimer_delete(struct thread *, int);
 int	kern_ktimer_settime(struct thread *td, int timer_id, int flags,
 	    struct itimerspec *val, struct itimerspec *oval);
@@ -532,7 +532,7 @@ int	kern_wait(struct thread *td, pid_t pid, int *status, int options,
 int	kern_wait4(struct thread *td, int pid, int * __capability status,
 	    int options, struct rusage * __capability rusage);
 int	kern_wait6(struct thread *td, enum idtype idtype, id_t id, int *status,
-	    int options, struct __wrusage *wrup, _siginfo_t *sip);
+	    int options, struct __wrusage *wrup, siginfo_t *sip);
 int	kern_write(struct thread *td, int fd, const void * __capability buf,
 	    size_t nbyte);
 int	kern_writev(struct thread *td, int fd, struct uio *auio);
@@ -650,7 +650,7 @@ int	user_uuidgen(struct thread *td, struct uuid * __capability storep,
 	    int count);
 int	user_wait6(struct thread *td, enum idtype idtype, id_t id,
 	    int * __capability statusp, int options,
-	    struct __wrusage * __capability wrusage, _siginfo_t *sip);
+	    struct __wrusage * __capability wrusage, siginfo_t *sip);
 int	user_writev(struct thread *td, int fd, void * __capability iovp,
 	    u_int iovcnt, copyinuio_t *copyinuio_f);
 

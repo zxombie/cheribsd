@@ -262,7 +262,7 @@ struct aioliojob {
 	int	lioj_flags;			/* (a) listio flags */
 	int	lioj_count;			/* (a) listio flags */
 	int	lioj_finished_count;		/* (a) listio flags */
-	ksigevent_t lioj_signal;		/* (a) signal on all I/O done */
+	struct	sigevent lioj_signal;		/* (a) signal on all I/O done */
 	TAILQ_ENTRY(aioliojob) lioj_list;	/* (a) lio list */
 	struct	knlist klist;			/* (a) list of knotes */
 	ksiginfo_t lioj_ksi;			/* (a) Realtime signal info */
@@ -485,7 +485,7 @@ aio_init_aioinfo(struct proc *p)
 }
 
 static int
-aio_sendsig(struct proc *p, ksigevent_t *sigev, ksiginfo_t *ksi)
+aio_sendsig(struct proc *p, struct sigevent *sigev, ksiginfo_t *ksi)
 {
 	struct thread *td;
 	int error;
@@ -1349,7 +1349,7 @@ unref:
 
 #ifdef COMPAT_FREEBSD6
 static int
-convert_old_sigevent(struct osigevent *osig, ksigevent_t *nsig)
+convert_old_sigevent(struct osigevent *osig, struct sigevent *nsig)
 {
 
 	/*
@@ -1367,7 +1367,7 @@ convert_old_sigevent(struct osigevent *osig, ksigevent_t *nsig)
 		nsig->sigev_notify_kqueue =
 		    osig->__sigev_u.__sigev_notify_kqueue;
 		nsig->sigev_value.sival_ptr =
-		    __USER_CAP_UNBOUND(osig->sigev_value.sival_ptr);
+		    osig->sigev_value.sival_ptr;
 		break;
 	default:
 		return (EINVAL);
@@ -1382,7 +1382,7 @@ aiocb_copyin_old_sigevent(void * __capability ujob, struct aiocb *kjob)
 	int error;
 
 	bzero(kjob, sizeof(struct aiocb));
-	error = copyin(ujob, kjob, sizeof(struct oaiocb));
+	error = copyincap(ujob, kjob, sizeof(struct oaiocb));
 	if (error)
 		return (error);
 	ojob = (struct oaiocb *)kjob;
@@ -1410,7 +1410,8 @@ aiocb_copyin(void * __capability ujob, kaiocb_t *kjob)
 	kjob->_aiocb_private.error = njob._aiocb_private.error;
 	kjob->_aiocb_private.kernelinfo =
 	    __USER_CAP_UNBOUND(njob._aiocb_private.kernelinfo);
-	return (convert_sigevent(&njob.aio_sigevent, &kjob->aio_sigevent));
+	kjob->aio_sigevent = njob.aio_sigevent;
+	return (0);
 #else
 	return (copyin(ujob, kjob, sizeof(kjob)));
 #endif
@@ -1682,17 +1683,7 @@ aio_aqueue(struct thread *td, kaiocb_t * __capability ujob, void *ujobptrp,
 	kev.filter = EVFILT_AIO;
 	kev.flags = EV_ADD | EV_ENABLE | EV_FLAG1 | evflags;
 	kev.data = (intptr_t)job;
-#ifdef COMPAT_FREEBSD32
-	if (SV_PROC_FLAG(td->td_proc, SV_ILP32))
-		kev.udata = __USER_CAP_UNBOUND((void *)(uintptr_t)job->uaiocb.aio_sigevent.sigev_value.sival_ptr32);
-	else
-#endif
-#ifdef COMPAT_CHERIABI
-	if (SV_PROC_FLAG(td->td_proc, SV_CHERI))
-		kev.udata = job->uaiocb.aio_sigevent.sigev_value.sival_ptr_c;
-	else
-#endif
-		kev.udata = __USER_CAP_UNBOUND(job->uaiocb.aio_sigevent.sigev_value.sival_ptr_native);
+	kev.udata = job->uaiocb.aio_sigevent.sigev_value.sival_ptr;
 	error = kqfd_register(kqfd, &kev, td, M_WAITOK);
 	if (error)
 		goto aqueue_fail;
@@ -2249,7 +2240,7 @@ sys_aio_mlock(struct thread *td, struct aio_mlock_args *uap)
 
 static int
 kern_lio_listio(struct thread *td, int mode, intcap_t uacb_list,
-    kaiocb_t * __capability *acb_list, int nent, ksigevent_t *sig,
+    kaiocb_t * __capability *acb_list, int nent, struct sigevent *sig,
     struct aiocb_ops *ops)
 {
 	struct proc *p = td->td_proc;
@@ -2292,17 +2283,7 @@ kern_lio_listio(struct thread *td, int mode, intcap_t uacb_list,
 			kev.ident = (uintptr_t)uacb_list; /* something unique */
 			kev.data = (intptr_t)lj;
 			/* pass user defined sigval data */
-#ifdef COMPAT_FREEBSD32
-			if (SV_PROC_FLAG(td->td_proc, SV_ILP32))
-				kev.udata = __USER_CAP_UNBOUND((void *)(uintptr_t)lj->lioj_signal.sigev_value.sival_ptr32);
-			else
-#endif
-#ifdef COMPAT_CHERIABI
-			if (SV_PROC_FLAG(td->td_proc, SV_CHERI))
-				kev.udata = lj->lioj_signal.sigev_value.sival_ptr_c;
-			else
-#endif
-				kev.udata = __USER_CAP_UNBOUND(lj->lioj_signal.sigev_value.sival_ptr_native);
+			kev.udata = lj->lioj_signal.sigev_value.sival_ptr;
 			error = kqfd_register(
 			    lj->lioj_signal.sigev_notify_kqueue, &kev, td,
 			    M_WAITOK);
@@ -2406,7 +2387,7 @@ int
 freebsd6_lio_listio(struct thread *td, struct freebsd6_lio_listio_args *uap)
 {
 	kaiocb_t **acb_list;
-	ksigevent_t *sigp, sig;
+	struct sigevent *sigp, sig;
 	struct osigevent osig;
 	int error, nent;
 
@@ -2445,7 +2426,7 @@ sys_lio_listio(struct thread *td, struct lio_listio_args *uap)
 {
 	kaiocb_t * __capability *acb_list;
 	kaiocb_t **acb_list_native;
-	ksigevent_t *sigp, sig;
+	struct sigevent *sigp, sig;
 	int error, i, nent;
 
 	if ((uap->mode != LIO_NOWAIT) && (uap->mode != LIO_WAIT))
@@ -2456,7 +2437,7 @@ sys_lio_listio(struct thread *td, struct lio_listio_args *uap)
 		return (EINVAL);
 
 	if (uap->sig && (uap->mode == LIO_NOWAIT)) {
-		error = copyin(uap->sig, &sig, sizeof(sig));
+		error = copyincap(uap->sig, &sig, sizeof(sig));
 		if (error)
 			return (error);
 		sigp = &sig;
@@ -2830,7 +2811,7 @@ typedef struct aiocb32 {
 
 #ifdef COMPAT_FREEBSD6
 static int
-convert_old_sigevent32(struct osigevent32 *osig, ksigevent_t sigevent *nsig)
+convert_old_sigevent32(struct osigevent32 *osig, struct sigevent *nsig)
 {
 
 	/*
@@ -2847,8 +2828,8 @@ convert_old_sigevent32(struct osigevent32 *osig, ksigevent_t sigevent *nsig)
 	case SIGEV_KEVENT:
 		nsig->sigev_notify_kqueue =
 		    osig->__sigev_u.__sigev_notify_kqueue;
-		nsig->sigev_value.sival_ptr =
-		    __USER_CAP_UNBOUND(PTRIN(osig->sigev_value.sival_ptr));
+		nsig->sigev_value.sival_ptr = (void * __capability)(uintcap_t)
+		    PTRIN(osig->sigev_value.sival_ptr);
 		break;
 	default:
 		return (EINVAL);
@@ -3152,7 +3133,7 @@ freebsd6_freebsd32_lio_listio(struct thread *td,
     struct freebsd6_freebsd32_lio_listio_args *uap)
 {
 	kaiocb_t **acb_list;
-	ksigevent_t *sigp, sig;
+	struct sigevent *sigp, sig;
 	struct osigevent32 osig;
 	uint32_t *acb_list32;
 	int error, i, nent;
@@ -3198,7 +3179,7 @@ int
 freebsd32_lio_listio(struct thread *td, struct freebsd32_lio_listio_args *uap)
 {
 	kaiocb_t **acb_list;
-	ksigevent_t *sigp, sig;
+	struct sigevent *sigp, sig;
 	struct sigevent32 sig32;
 	uint32_t *acb_list32;
 	int error, i, nent;
@@ -3284,7 +3265,7 @@ typedef struct aiocb64 {
 
 #ifdef COMPAT_FREEBSD6
 static int
-convert_old_sigevent64(struct osigevent64 *osig, ksigevent_t sigevent *nsig)
+convert_old_sigevent64(struct osigevent64 *osig, struct sigevent *nsig)
 {
 
 	/*
@@ -3301,8 +3282,8 @@ convert_old_sigevent64(struct osigevent64 *osig, ksigevent_t sigevent *nsig)
 	case SIGEV_KEVENT:
 		nsig->sigev_notify_kqueue =
 		    osig->__sigev_u.__sigev_notify_kqueue;
-		nsig->sigev_value.sival_ptr =
-		    __USER_CAP_UNBOUND(PTRIN(osig->sigev_value.sival_ptr));
+		nsig->sigev_value.sival_ptr = (void * __capability)(uintcap_t)
+		    osig->sigev_value.sival_ptr;
 		break;
 	default:
 		return (EINVAL);
@@ -3601,7 +3582,7 @@ freebsd6_freebsd64_lio_listio(struct thread *td,
     struct freebsd6_freebsd64_lio_listio_args *uap)
 {
 	kaiocb_t **acb_list;
-	ksigevent_t *sigp, sig;
+	struct sigevent *sigp, sig;
 	struct osigevent64 osig;
 	uint64_t *acb_list64;
 	int error, i, nent;
@@ -3647,7 +3628,7 @@ int
 freebsd64_lio_listio(struct thread *td, struct freebsd64_lio_listio_args *uap)
 {
 	kaiocb_t * __capability *acb_list;
-	ksigevent_t *sigp, sig;
+	struct sigevent *sigp, sig;
 	struct sigevent64 sig64;
 	void * /* __ptr64 */ *acb_list64;
 	int error, i, nent;
@@ -3921,7 +3902,7 @@ int
 cheriabi_lio_listio(struct thread *td, struct cheriabi_lio_listio_args *uap)
 {
 	kaiocb_t * __capability *acb_list;
-	ksigevent_t *sigp, sig;
+	struct sigevent *sigp, sig;
 	int error, nent;
 
 	if ((uap->mode != LIO_NOWAIT) && (uap->mode != LIO_WAIT))
