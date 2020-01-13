@@ -1,4 +1,4 @@
-#ifdef _INCLUDING_USR_INCLUDE_LIMTITS
+#ifdef _INCLUDING_USR_INCLUDE_LIMITS
 #if __has_include_next(<limits.h>)
 #include_next <limits.h>
 #endif
@@ -11,11 +11,11 @@
 #include <sys/types.h>
 #include <sys/uio.h> // For IOV_MAX
 
-#if !defined(__clang__) && __has_include(</usr/include/limits.h>) && !defined(_INCLUDING_USR_INCLUDE_LIMTITS)
-#define _INCLUDING_USR_INCLUDE_LIMTITS
+#if !defined(__clang__) && __has_include(</usr/include/limits.h>) && !defined(_INCLUDING_USR_INCLUDE_LIMITS)
+#define _INCLUDING_USR_INCLUDE_LIMITS
 /* For some reason GCC picks the wrong limits.h */
 #include </usr/include/limits.h>
-#undef _INCLUDING_USR_INCLUDE_LIMTITS
+#undef _INCLUDING_USR_INCLUDE_LIMITS
 #endif
 
 #include_next <limits.h>
@@ -91,4 +91,4 @@
 // #error _POSIX_PATH_MAX should be defined
 #endif
 
-#endif /* _INCLUDING_USR_INCLUDE_LIMTITS */
+#endif /* _INCLUDING_USR_INCLUDE_LIMITS */
