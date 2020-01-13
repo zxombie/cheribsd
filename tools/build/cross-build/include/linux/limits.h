@@ -76,10 +76,6 @@
 #warning __USE_POSIX not defined
 #endif
 
-#if defined __GNUC__ && !defined _GCC_LIMITS_H_
-#error "GCC limits not included"
-#endif
-
 #ifndef __OFF_T_MATCHES_OFF64_T
 #error "Expected 64-bit off_t"
 #endif
