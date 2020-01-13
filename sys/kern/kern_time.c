@@ -1407,14 +1407,14 @@ ktimer_caprevoke(struct proc *p, const struct vm_caprevoke_cookie *crc)
 		if (it == NULL)
 			continue;
 
-		void * __capability v = it->it_sigev.sigev_value.sival_ptr_c;
+		void * __capability v = it->it_sigev.sigev_value.sival_ptr;
 
 		if (!cheri_gettag(v))
 			continue;
 
 		CAPREVOKE_STATS_BUMP(crst, caps_found);
 		if (vm_caprevoke_test(crc, v)) {
-			it->it_sigev.sigev_value.sival_ptr_c = cheri_revoke(v);
+			it->it_sigev.sigev_value.sival_ptr = cheri_revoke(v);
 			CAPREVOKE_STATS_BUMP(crst, caps_cleared);
 		}
 	}

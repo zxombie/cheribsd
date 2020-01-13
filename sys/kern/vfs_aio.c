@@ -2729,7 +2729,7 @@ restart:
 	/* Visit all pending jobs. */
 	TAILQ_FOREACH_SAFE(job, &ki->kaio_jobqueue, plist, jobn) {
 		void * __capability uc =
-			job->uaiocb.aio_sigevent.sigev_value.sival_ptr_c;
+			job->uaiocb.aio_sigevent.sigev_value.sival_ptr;
 
 		/* Zorch user pointers being revoked.
 		 *
@@ -2738,7 +2738,7 @@ restart:
 		 * scrubbed by userland.
 		 */
 		if (vm_caprevoke_test(crc, uc)) {
-			job->uaiocb.aio_sigevent.sigev_value.sival_ptr_c =
+			job->uaiocb.aio_sigevent.sigev_value.sival_ptr =
 				cheri_revoke(uc);
 		}
 
