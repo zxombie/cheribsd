@@ -496,8 +496,20 @@ sys_mmap(struct thread *td, struct mmap_args *uap)
 }
 
 int
-kern_mmap(struct thread *td, uintptr_t addr0, size_t len, int prot,
-    int flags, int fd, off_t pos)
+kern_mmap(struct thread *td, uintptr_t addr0, size_t len, int prot, int flags,
+    int fd, off_t pos)
+{
+
+	return (kern_mmap_fpcheck(td, addr0, len, prot, flags, fd, pos, NULL));
+}
+
+/*
+ * When mmap'ing a file, check_fp_fn may be used for the caller to do any
+ * last-minute validation based on the referenced file in a non-racy way.
+ */
+int
+kern_mmap_fpcheck(struct thread *td, uintptr_t addr0, size_t len, int prot,
+    int flags, int fd, off_t pos, mmap_check_fp_fn check_fp_fn)
 {
 	struct mmap_req	mr = {
 		.mr_hint = addr0,
@@ -505,7 +517,8 @@ kern_mmap(struct thread *td, uintptr_t addr0, size_t len, int prot,
 		.mr_prot = prot,
 		.mr_flags = flags,
 		.mr_fd = fd,
-		.mr_pos = pos
+		.mr_pos = pos,
+		.mr_check_fp_fn = check_fp_fn
 	};
 
 	return (kern_mmap_req(td, &mr));
@@ -541,6 +554,7 @@ kern_mmap_req(struct thread *td, const struct mmap_req *mrp)
 	vm_prot_t cap_maxprot;
 	int align, error, fd, flags, max_prot, prot;
 	cap_rights_t rights;
+	mmap_check_fp_fn check_fp_fn;
 
 	addr = mrp->mr_hint;
 	max_addr = mrp->mr_max_addr;
@@ -549,6 +563,7 @@ kern_mmap_req(struct thread *td, const struct mmap_req *mrp)
 	flags = mrp->mr_flags;
 	fd = mrp->mr_fd;
 	pos = mrp->mr_pos;
+	check_fp_fn = mrp->mr_check_fp_fn;
 
 	p = td->td_proc;
 
@@ -855,6 +870,12 @@ kern_mmap_req(struct thread *td, const struct mmap_req *mrp)
 			    "requested maximum permissions", __func__);
 			error = EINVAL;
 			goto done;
+		}
+		if (check_fp_fn != NULL) {
+			error = check_fp_fn(fp, prot, max_prot & cap_maxprot,
+			    flags);
+			if (error != 0)
+				goto done;
 		}
 		/* This relies on VM_PROT_* matching PROT_*. */
 		error = fo_mmap(fp, &vms->vm_map, &addr, max_addr, size,

@@ -35,6 +35,7 @@
 #include <sys/sem.h>
 #include <sys/socket.h>
 #include <sys/mac.h>
+#include <sys/mman.h>
 #include <sys/mount.h>
 #include <sys/_cpuset.h>
 #include <sys/_domainset.h>
@@ -70,7 +71,6 @@ struct thr_param;
 struct timex;
 struct uio;
 struct uuid;
-
 
 int	kern___acl_aclcheck_fd(struct thread *td, int filedes, acl_type_t type,
 	    const struct acl * __capability aclp);
@@ -316,6 +316,9 @@ int	kern_mlock(struct proc *proc, struct ucred *cred, uintptr_t addr,
 	    size_t len);
 int	kern_mmap(struct thread *td, uintptr_t addr, size_t len, int prot,
 	    int flags, int fd, off_t pos);
+int	kern_mmap_fpcheck(struct thread *td, uintptr_t addr, size_t len,
+	    int prot, int flags, int fd, off_t pos,
+	    mmap_check_fp_fn check_fp_fn);
 int	kern_mmap_maxprot(struct proc *p, int prot);
 int	kern_mmap_req(struct thread *td, const struct mmap_req *mrp);
 int	kern_modfind(struct thread *td, const char * __capability uname);
@@ -449,9 +452,9 @@ int	kern_setsockopt(struct thread *td, int s, int level, int name,
 int	kern_settimeofday(struct thread *td, struct timeval *tv,
 	    struct timezone *tzp);
 int	kern_shm_open(struct thread *td, const char * __capability userpath,
-	    int flags, mode_t mode, struct filecaps *fcaps, int initial_seals);
+	    int flags, mode_t mode, struct filecaps *fcaps);
 int	kern_shm_open2(struct thread *td, const char * __capability path,
-	    int flags, mode_t mode, int shmflags,
+	    int flags, mode_t mode, int shmflags, struct filecaps *fcaps,
 	    const char * __capability name);
 int	kern_shm_rename(struct thread *td,
 	    const char * __capability path_from_p,

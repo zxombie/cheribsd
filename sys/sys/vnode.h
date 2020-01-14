@@ -174,7 +174,6 @@ struct vnode {
 	int	v_writecount;			/* I ref count of writers or
 						   (negative) text users */
 	u_int	v_hash;
-	const char *v_tag;			/* u type of underlying data */
 };
 
 #endif /* defined(_KERNEL) || defined(_KVM_VNODE) */
@@ -243,6 +242,7 @@ struct xvnode {
 #define	VI_ACTIVE	0x0200	/* This vnode is on the active list */
 #define	VI_DOINGINACT	0x0800	/* VOP_INACTIVE is in progress */
 #define	VI_OWEINACT	0x1000	/* Need to call inactive */
+#define	VI_DEFINACT	0x2000	/* deferred inactive */
 
 #define	VV_ROOT		0x0001	/* root of its filesystem */
 #define	VV_ISTTY	0x0002	/* vnode represents a tty */
@@ -663,7 +663,7 @@ void	vgone(struct vnode *vp);
 void	vhold(struct vnode *);
 void	vholdl(struct vnode *);
 void	vholdnz(struct vnode *);
-void	vinactive(struct vnode *, struct thread *);
+void	vinactive(struct vnode *vp);
 int	vinvalbuf(struct vnode *vp, int save, int slpflag, int slptimeo);
 int	vtruncbuf(struct vnode *vp, off_t length, int blksize);
 void	v_inval_buf_range(struct vnode *vp, daddr_t startlbn, daddr_t endlbn,
@@ -893,7 +893,7 @@ do {									\
 #define	VOP_UNSET_TEXT_CHECKED(vp)		VOP_UNSET_TEXT((vp))
 #endif
 
-#define	VN_IS_DOOMED(vp)	((vp)->v_irflag & VIRF_DOOMED)
+#define	VN_IS_DOOMED(vp)	__predict_false((vp)->v_irflag & VIRF_DOOMED)
 
 void	vput(struct vnode *vp);
 void	vrele(struct vnode *vp);
@@ -960,8 +960,6 @@ void vn_fsid(struct vnode *vp, struct vattr *va);
 	int _flags = (flags);						\
 	int _error;							\
 									\
-	CTASSERT(__builtin_constant_p(flags) ? 				\
-	    (flags & ~(LK_INTERLOCK | LK_RELEASE)) == 0 : 1);		\
         if ((_flags & ~(LK_INTERLOCK | LK_RELEASE)) != 0)		\
                 panic("%s: unsupported flags %x\n", __func__, flags);	\
         _error = VOP_UNLOCK(_vp);					\

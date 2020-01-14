@@ -228,7 +228,8 @@ vm_page_init_cache_zones(void *dummy __unused)
 	int cache, domain, maxcache, pool;
 
 	maxcache = 0;
-	TUNABLE_INT_FETCH("vm.pgcache_zone_max", &maxcache);
+	TUNABLE_INT_FETCH("vm.pgcache_zone_max_pcpu", &maxcache);
+	maxcache *= mp_ncpus;
 	for (domain = 0; domain < vm_ndomains; domain++) {
 		vmd = VM_DOMAIN(domain);
 		for (pool = 0; pool < VM_NFREEPOOL; pool++) {
@@ -613,10 +614,17 @@ vm_page_startup(vm_offset_t vaddr)
 	    slab_ipers(sizeof(struct vm_map), UMA_ALIGN_PTR));
 
 	/*
-	 * Before going fully functional kmem_init() does allocation
-	 * from "KMAP ENTRY" and vmem_create() does allocation from "vmem".
+	 * Before we are fully boot strapped we need to account for the
+	 * following allocations:
+	 *
+	 * "KMAP ENTRY" from kmem_init()
+	 * "vmem btag" from vmem_startup()
+	 * "vmem" from vmem_create()
+	 * "KMAP" from vm_map_startup()
+	 *
+	 * Each needs at least one page per-domain.
 	 */
-	boot_pages += 2;
+	boot_pages += 4 * vm_ndomains;
 #endif
 	/*
 	 * CTFLAG_RDTUN doesn't work during the early boot process, so we must
