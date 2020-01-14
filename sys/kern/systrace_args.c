@@ -1334,8 +1334,8 @@ systrace_args(int sysnum, void *params, uint64_t *uarg, int *n_args)
 	case 259: {
 		struct caprevoke_shadow_args *p = params;
 		iarg[0] = p->flags; /* int */
-		uarg[1] = (intptr_t) p->arena; /* void * */
-		uarg[2] = (intptr_t) p->shadow; /* void * */
+		uarg[1] = (intptr_t) p->arena; /* void * __capability */
+		uarg[2] = (intptr_t) p->shadow; /* void * __capability */
 		*n_args = 3;
 		break;
 	}
@@ -1344,14 +1344,14 @@ systrace_args(int sysnum, void *params, uint64_t *uarg, int *n_args)
 		struct caprevoke_args *p = params;
 		iarg[0] = p->flags; /* int */
 		uarg[1] = p->start_epoch; /* uint64_t */
-		uarg[2] = (intptr_t) p->statout; /* struct caprevoke_stats * */
+		uarg[2] = (intptr_t) p->statout; /* struct caprevoke_stats * __capability */
 		*n_args = 3;
 		break;
 	}
 	/* caprevoke_entire_shadow_cap */
 	case 261: {
 		struct caprevoke_entire_shadow_cap_args *p = params;
-		uarg[0] = (intptr_t) p->shadow; /* void * */
+		uarg[0] = (intptr_t) p->shadow; /* void * __capability */
 		*n_args = 1;
 		break;
 	}
@@ -5494,10 +5494,10 @@ systrace_entry_setargdesc(int sysnum, int ndx, char *desc, size_t descsz)
 			p = "int";
 			break;
 		case 1:
-			p = "userland void *";
+			p = "userland void * __capability";
 			break;
 		case 2:
-			p = "userland void *";
+			p = "userland void * __capability";
 			break;
 		default:
 			break;
@@ -5513,7 +5513,7 @@ systrace_entry_setargdesc(int sysnum, int ndx, char *desc, size_t descsz)
 			p = "uint64_t";
 			break;
 		case 2:
-			p = "userland struct caprevoke_stats *";
+			p = "userland struct caprevoke_stats * __capability";
 			break;
 		default:
 			break;
@@ -5523,7 +5523,7 @@ systrace_entry_setargdesc(int sysnum, int ndx, char *desc, size_t descsz)
 	case 261:
 		switch(ndx) {
 		case 0:
-			p = "userland void *";
+			p = "userland void * __capability";
 			break;
 		default:
 			break;

@@ -731,16 +731,16 @@ struct kbounce_args {
 };
 struct caprevoke_shadow_args {
 	char flags_l_[PADL_(int)]; int flags; char flags_r_[PADR_(int)];
-	char arena_l_[PADL_(void *)]; void * arena; char arena_r_[PADR_(void *)];
-	char shadow_l_[PADL_(void *)]; void * shadow; char shadow_r_[PADR_(void *)];
+	char arena_l_[PADL_(void * __capability)]; void * __capability arena; char arena_r_[PADR_(void * __capability)];
+	char shadow_l_[PADL_(void * __capability)]; void * __capability shadow; char shadow_r_[PADR_(void * __capability)];
 };
 struct caprevoke_args {
 	char flags_l_[PADL_(int)]; int flags; char flags_r_[PADR_(int)];
 	char start_epoch_l_[PADL_(uint64_t)]; uint64_t start_epoch; char start_epoch_r_[PADR_(uint64_t)];
-	char statout_l_[PADL_(struct caprevoke_stats *)]; struct caprevoke_stats * statout; char statout_r_[PADR_(struct caprevoke_stats *)];
+	char statout_l_[PADL_(struct caprevoke_stats * __capability)]; struct caprevoke_stats * __capability statout; char statout_r_[PADR_(struct caprevoke_stats * __capability)];
 };
 struct caprevoke_entire_shadow_cap_args {
-	char shadow_l_[PADL_(void *)]; void * shadow; char shadow_r_[PADR_(void *)];
+	char shadow_l_[PADL_(void * __capability)]; void * __capability shadow; char shadow_r_[PADR_(void * __capability)];
 };
 struct lchmod_args {
 	char path_l_[PADL_(const char * __capability)]; const char * __capability path; char path_r_[PADR_(const char * __capability)];
