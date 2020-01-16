@@ -75,12 +75,10 @@ struct SimpleExternalCallTrampoline {
 	inline dlfunc_t pcc_value() const {
 		void* result = cheri_incoffset(this, offsetof(SimpleExternalCallTrampoline, code));
 		result = cheri_clearperm(result, FUNC_PTR_REMOVE_PERMS);
-#ifdef notyet
 #if __has_builtin(__builtin_cheri_seal_entry)
 		result = __builtin_cheri_seal_entry(result);
 #else
 #warning "__builtin_cheri_seal_entry not supported, please update LLVM"
-#endif
 #endif
 		return (dlfunc_t)result;
 	}
