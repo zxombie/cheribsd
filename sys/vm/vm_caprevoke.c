@@ -107,6 +107,7 @@ retry:
 		m->oflags |= VPO_PASTCAPSTORE;
 	} else {
 		m->oflags &= ~VPO_PASTCAPSTORE;
+		CAPREVOKE_STATS_BUMP(crst, pages_mark_clean);
 	}
 
 	return VM_CAPREVOKE_VIS_DONE;
