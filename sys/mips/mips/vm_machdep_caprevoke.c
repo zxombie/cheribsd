@@ -361,8 +361,22 @@ vm_caprevoke_page_ro_adapt(int *res,
 {
 	(void)cutp;
 
-	if (cheri_gettag(cut) && ctp(crshadow, cut, cheri_getperm(cut))) {
-		*res = VM_CAPREVOKE_PAGE_DIRTY;
+	/*
+	 * Being untagged would imply mutation, but we're visiting this page
+	 * under the assumption that it's read-only.
+	 */
+	KASSERT(cheri_gettag(cut), ("vm_caprevoke_page_ro_adapt untagged"));
+
+	/* If the thing has no permissions, we don't need to scan it later */
+	if (cheri_getperm(cut) == 0)
+		return 0;
+
+	*res |= VM_CAPREVOKE_PAGE_HASCAPS;
+
+	if (ctp(crshadow, cut, cheri_getperm(cut))) {
+		*res |= VM_CAPREVOKE_PAGE_DIRTY;
+
+		/* One dirty answer is as good as any other; stop eary */
 		return 1;
 	}
 
@@ -378,7 +392,7 @@ vm_caprevoke_page_ro_adapt(int *res,
  * know the answer.
  *
  * VM_CAPREVOKE_PAGE_HASCAPS continues to mean what it meant before: we
- * saw at least one capability on this page.
+ * saw at least one, permission-bearing capability on this page.
  */
 int
 vm_caprevoke_page_ro(const struct vm_caprevoke_cookie *crc, vm_page_t m)

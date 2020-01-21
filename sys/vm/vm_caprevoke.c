@@ -143,10 +143,18 @@ vm_caprevoke_visit_ro(const struct vm_caprevoke_cookie *crc, int flags,
 	VM_OBJECT_WLOCK(m->object);
 	vm_page_xunbusy(m);
 
-	/*
-	 * Don't update PASTCAPSTORE here!  I know it's tempting, but the
-	 * page might be shared!
-	 */
+	if ((hascaps & VM_CAPREVOKE_PAGE_HASCAPS) == 0) {
+		/*
+		 * This can only be true if we scanned the entire page and
+		 * found no tagged, permission-bearing things.  In that case,
+		 * even though the page is possibly shared, it's safe to mark
+		 * it as clean for subsequent revocation passes!
+		 */
+		vm_page_aflag_clear(m, PGA_CAPSTORED);
+		m->oflags &= ~VPO_PASTCAPSTORE;
+
+		CAPREVOKE_STATS_BUMP(crst, pages_mark_clean);
+	}
 
 	if (hascaps & VM_CAPREVOKE_PAGE_DIRTY) {
 		return VM_CAPREVOKE_VIS_DIRTY;
