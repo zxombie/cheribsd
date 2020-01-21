@@ -279,7 +279,7 @@ vm_caprevoke_page_iter(const struct vm_caprevoke_cookie *crc,
 			void * __capability cut = *mvu;
 			if (cheri_gettag(cut)) {
 #ifdef CHERI_CAPREVOKE_STATS
-				seentag++
+				seentag++;
 #endif
 				if (cb(&res, crc, crshadow, ctp, mvt, *mvt))
 					goto out;
