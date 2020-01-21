@@ -283,15 +283,17 @@ vm_caprevoke_object_at(const struct vm_caprevoke_cookie *crc, int flags,
 		}
 
 		if (m->object == obj) {
-			/*
-			 * XXX I don't quite understand how this is
-			 * possible, but something seems fishy about
-			 * this situation.  Just go force a RW fault
-			 * to copy up the page
-			 */
+			/* Go visit the page RW in place */
 			goto visit_rw;
 		}
 
+		/*
+		 * XXX I don't quite understand how this is
+		 * possible, but something seems fishy about
+		 * this situation.  Just go force a RW fault
+		 * to copy up the page
+		 */
+		goto visit_rw_fault;
 	}
 
 	if (!vm_caprevoke_should_visit_page(m, flags)) {
@@ -332,6 +334,7 @@ vm_caprevoke_object_at(const struct vm_caprevoke_cookie *crc, int flags,
 		panic("bad result from vm_caprevoke_visit_ro");
 	}
 
+visit_rw_fault:
 	CAPREVOKE_STATS_BUMP(crst, pages_faulted_rw);
 
 	int res;
