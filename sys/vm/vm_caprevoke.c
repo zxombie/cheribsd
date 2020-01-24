@@ -154,6 +154,16 @@ vm_caprevoke_visit_ro(const struct vm_caprevoke_cookie *crc, int flags,
 		m->oflags &= ~VPO_PASTCAPSTORE;
 
 		CAPREVOKE_STATS_BUMP(crst, pages_mark_clean);
+	} else if (m->a.flags & PGA_CAPSTORED) {
+		/*
+		 * Even if we have capabilities here, it's sufficient to
+		 * visit only in the opening pass.  While RW pages would
+		 * rely on PGA_CAPSTORED to be revisited, for RO pages,
+		 * VIS_DIRTY causes us to upgrade to RW now, so this is
+		 * a fine shuffling of capdirty bits.
+		 */
+		vm_page_aflag_clear(m, PGA_CAPSTORED);
+		m->oflags |= VPO_PASTCAPSTORE;
 	}
 
 	if (hascaps & VM_CAPREVOKE_PAGE_DIRTY) {
@@ -329,6 +339,7 @@ vm_caprevoke_object_at(const struct vm_caprevoke_cookie *crc, int flags,
 		VM_OBJECT_ASSERT_UNLOCKED(obj);
 		return VM_CAPREVOKE_AT_TICK;
 	case VM_CAPREVOKE_VIS_DIRTY:
+		/* Dirty here means we need to upgrade to RW now */
 		break;
 	default:
 		panic("bad result from vm_caprevoke_visit_ro");
