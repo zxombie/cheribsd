@@ -584,7 +584,7 @@ cheriabi_caprevoke_shadow(struct thread *td,
 	return error;
 }
 
-void * __capability caprev_shadow_cap;
+extern void * __capability caprev_shadow_cap;
 int
 cheriabi_caprevoke_entire_shadow_cap(struct thread *td,
 			    struct cheriabi_caprevoke_entire_shadow_cap_args *uap)
