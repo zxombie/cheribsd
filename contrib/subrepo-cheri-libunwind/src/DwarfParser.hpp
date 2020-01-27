@@ -153,7 +153,6 @@ const char *CFI_Parser<A>::decodeFDE(A &addressSpace, pc_t pc, pint_t fdeStart,
       addressSpace.getEncodedP(p, nextCFI, cieInfo->pointerEncoding);
 #ifdef __CHERI_PURE_CAPABILITY__
   // This should not be a valid pointer:
-  assert(!__builtin_cheri_tag_get((void*)_pcStart));
   addr_t pcStart = __builtin_cheri_address_get((void*)_pcStart);
 #else
   addr_t pcStart = (addr_t)_pcStart;
@@ -161,7 +160,6 @@ const char *CFI_Parser<A>::decodeFDE(A &addressSpace, pc_t pc, pint_t fdeStart,
   pint_t _pcRange = addressSpace.getEncodedP(
       p, nextCFI, cieInfo->pointerEncoding & 0x0F);
 #ifdef __CHERI_PURE_CAPABILITY__
-  assert(!__builtin_cheri_tag_get((void*)_pcRange));
   addr_t pcRange = __builtin_cheri_address_get((void*)_pcRange);
 #else
   addr_t pcRange = (addr_t)_pcRange;
