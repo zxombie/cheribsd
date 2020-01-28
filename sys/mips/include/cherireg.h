@@ -65,6 +65,7 @@
 #define	CHERI_PERM_CCALL			(1 << 8)	/* 0x00000100 */
 #define	CHERI_PERM_UNSEAL			(1 << 9)	/* 0x00000200 */
 #define	CHERI_PERM_SYSTEM_REGS			(1 << 10)	/* 0x00000400 */
+#define	CHERI_PERM_SET_CID			(1 << 11)	/* 0x00000800 */
 
 /*
  * User-defined permission bits.
@@ -162,7 +163,7 @@
 	CHERI_PERM_LOAD | CHERI_PERM_STORE | CHERI_PERM_LOAD_CAP |	\
 	CHERI_PERM_STORE_CAP | CHERI_PERM_STORE_LOCAL_CAP |		\
 	CHERI_PERM_SEAL | CHERI_PERM_CCALL | CHERI_PERM_UNSEAL |	\
-	CHERI_PERM_SYSTEM_REGS)
+	CHERI_PERM_SYSTEM_REGS | CHERI_PERM_SET_CID)
 
 /*
  * Hardware defines a kind of tripartite taxonomy: memory, type, and CID.
@@ -192,6 +193,10 @@
  * executable capabilities ($pcc); CHERI_PERM_STORE, CHERI_PERM_STORE_CAP,
  * and CHERI_PERM_STORE_LOCAL_CAP will be added for data permissions ($c0).
  *
+ * All user software permissions are included along with
+ * CHERI_PERM_SYSCALL.  CHERI_PERM_CHERIABI_VMMAP will be added for
+ * permissions returned from mmap().
+ *
  * No variation required between 256-bit and 128-bit CHERI.
  */
 #define	CHERI_PERMS_USERSPACE						\
@@ -207,8 +212,8 @@
 /*
  * _DATA includes _VMMAP so that we can derive the MMAP cap from it.
  *
- * XXX: Should it include "unallocated" user permissions so
- * userspace can use them?
+ * XXX: We may not want to include VMMAP here and instead only in
+ * CHERI_CAP_USER_MMAP_PERMS
  */
 #define	CHERI_PERMS_USERSPACE_DATA					\
 				(CHERI_PERMS_USERSPACE |		\
@@ -386,7 +391,8 @@
 #define	CHERI_EXCCODE_UNDERFLOW		0x07
 #define	CHERI_EXCCODE_USER_PERM		0x08
 #define	CHERI_EXCCODE_PERM_USER		CHERI_EXCCODE_USER_PERM
-#define	CHERI_EXCCODE_TLBSTORE		0x09
+#define	CHERI_EXCCODE_MMUSTORE		0x09
+#define	CHERI_EXCCODE_TLBSTORE		CHERI_EXCCODE_MMUSTORE
 #define	CHERI_EXCCODE_IMPRECISE		0x0a
 #define	_CHERI_EXCCODE_RESERVED0b	0x0b
 #define	_CHERI_EXCCODE_RESERVED0c	0x0c
@@ -405,7 +411,7 @@
 #define	CHERI_EXCCODE_PERM_CCALL	0x19
 #define	CHERI_EXCCODE_CCALL_IDC		0x1a
 #define	CHERI_EXCCODE_PERM_UNSEAL	0x1b
-#define	_CHERI_EXCCODE_RESERVED1c	0x1c
+#define	CHERI_EXCCODE_PERM_SET_CID	0x1c
 #define	_CHERI_EXCCODE_RESERVED1d	0x1d
 #define	_CHERI_EXCCODE_RESERVED1e	0x1e
 #define	_CHERI_EXCCODE_RESERVED1f	0x1f

@@ -177,7 +177,7 @@ void	kassert_panic(const char *fmt, ...)  __printflike(1, 2);
  * sentinel values to work.
  */
 #define ___USER_CFROMPTR(ptr, cap)					\
-    ((ptr) == NULL ? NULL :						\
+    ((void *)(uintptr_t)(ptr) == NULL ? NULL :				\
      ((vm_offset_t)(ptr) < 4096 ||					\
       (vm_offset_t)(ptr) > VM_MAXUSER_ADDRESS) ?			\
 	__builtin_cheri_offset_set(NULL, (vaddr_t)(ptr)) :		\
@@ -391,9 +391,9 @@ int	bcmp(const void *b1, const void *b2, size_t len);
 void	*memset(void * _Nonnull buf, int c, size_t len);
 void	*memcpy(void * _Nonnull to, const void * _Nonnull from, size_t len);
 #if __has_feature(capabilities)
-void	*memcpy_c(void * _Nonnull __capability to,
+void	* __capability memcpy_c(void * _Nonnull __capability to,
 	    const void * _Nonnull __capability from, size_t len);
-void	*memcpynocap_c(void * _Nonnull __capability to,
+void	* __capability memcpynocap_c(void * _Nonnull __capability to,
 	    const void * _Nonnull __capability from, size_t len);
 void	*cheri_memcpy(void *dst, const void *src, size_t len);
 #else
@@ -402,9 +402,9 @@ void	*cheri_memcpy(void *dst, const void *src, size_t len);
 #endif
 void	*memmove(void * _Nonnull dest, const void * _Nonnull src, size_t n);
 #if __has_feature(capabilities)
-void	*memmove_c(void * _Nonnull __capability dest,
+void	* __capability memmove_c(void * _Nonnull __capability dest,
 	    const void * _Nonnull __capability src, size_t n);
-void	*memmovenocap_c(void * _Nonnull __capability dest,
+void	* __capability memmovenocap_c(void * _Nonnull __capability dest,
 	    const void * _Nonnull __capability src, size_t n);
 #endif
 
@@ -594,6 +594,7 @@ int	suword_c(volatile void * __capability base, long word);
 int	suword16_c(volatile void * __capability base, int word);
 int	suword32_c(volatile void * __capability base, int32_t word);
 int	suword64_c(volatile void * __capability base, int64_t word);
+int	sucap(volatile const void * __capability base, intcap_t val);
 uint32_t casuword32_c(volatile uint32_t * __capability base, uint32_t oldval,
 	    uint32_t newval);
 u_long	casuword_c(volatile u_long * __capability base, u_long oldval,
@@ -615,6 +616,7 @@ int	casueword32_c(volatile uint32_t * __capability base, uint32_t oldval,
 #define	suword16_c	suword16
 #define	suword32_c	suword32
 #define	suword64_c	suword64
+#define	sucap		suword
 #define	casuword32_c	casuword32
 #define	casuword_c	casuword
 #define	casueword32_c	casueword32
