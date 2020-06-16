@@ -317,7 +317,6 @@ int cheriabi_sysargmask[] = {
  [CHERIABI_SYS_cheriabi_jail_get] = (0x0 | 0x1),
  [CHERIABI_SYS_cheriabi_jail_set] = (0x0 | 0x1),
  [CHERIABI_SYS_jail_remove] = (0x0),
- [CHERIABI_SYS_closefrom] = (0x0),
  [CHERIABI_SYS_cheriabi___semctl] = (0x0 | 0x8),
  [CHERIABI_SYS_cheriabi_msgctl] = (0x0 | 0x4),
  [CHERIABI_SYS_cheriabi_shmctl] = (0x0 | 0x4),
@@ -376,6 +375,10 @@ int cheriabi_sysargmask[] = {
  [CHERIABI_SYS_cheriabi___sysctlbyname] = (0x0 | 0x1 | 0x4 | 0x8 | 0x10),
  [CHERIABI_SYS_cheriabi_shm_open2] = (0x0 | 0x1 | 0x10),
  [CHERIABI_SYS_cheriabi_shm_rename] = (0x0 | 0x1 | 0x2),
+ [CHERIABI_SYS_cheriabi_sigfastblock] = (0x0 | 0x2),
+ [CHERIABI_SYS_cheriabi___realpathat] = (0x0 | 0x2 | 0x4),
+ [CHERIABI_SYS_close_range] = (0x0),
+ [CHERIABI_SYS_cheriabi_rpctls_syscall] = (0x0 | 0x2),
 };
 
 #endif /* !_CHERIABI_SYSARGMAP_H_ */

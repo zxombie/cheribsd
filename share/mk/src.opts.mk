@@ -62,15 +62,12 @@ __DEFAULT_YES_OPTIONS = \
     AUTHPF \
     AUTOFS \
     BHYVE \
-    BINUTILS \
-    BINUTILS_BOOTSTRAP \
     BLACKLIST \
     BLUETOOTH \
     BOOT \
     BOOTPARAMD \
     BOOTPD \
     BSD_CPIO \
-    BSD_CRTBEGIN \
     BSDINSTALL \
     BSNMP \
     BZIP2 \
@@ -80,6 +77,9 @@ __DEFAULT_YES_OPTIONS = \
     CASPER \
     CCD \
     CDDL \
+    CLANG \
+    CLANG_BOOTSTRAP \
+    CLANG_IS_CC \
     CPP \
     CROSS_COMPILER \
     CRYPT \
@@ -104,7 +104,6 @@ __DEFAULT_YES_OPTIONS = \
     FREEBSD_UPDATE \
     FTP \
     GAMES \
-    GCOV \
     GDB \
     GNU_DIFF \
     GNU_GREP \
@@ -126,10 +125,14 @@ __DEFAULT_YES_OPTIONS = \
     LDNS \
     LDNS_UTILS \
     LEGACY_CONSOLE \
+    LIBCPLUSPLUS \
     LIBPTHREAD \
     LIBTHR \
+    LLD \
+    LLD_BOOTSTRAP \
+    LLD_IS_LD \
+    LLVM_ASSERTIONS \
     LLVM_COV \
-    LLVM_LIBUNWIND \
     LLVM_TARGET_ALL \
     LOADER_GELI \
     LOADER_LUA \
@@ -196,19 +199,14 @@ __DEFAULT_YES_OPTIONS = \
     ZONEINFO
 
 __DEFAULT_NO_OPTIONS = \
-    AMD \
     BEARSSL \
+    BHYVE_SNAPSHOT \
     BSD_GREP \
     CLANG_EXTRAS \
     DTRACE_TESTS \
     EXPERIMENTAL \
-    GCC \
-    GCC_BOOTSTRAP \
-    GNUCXX \
     GNU_GREP_COMPAT \
-    GPL_DTC \
     HESIOD \
-    HTTPD \
     LIBSOFT \
     LOADER_FIREWIRE \
     LOADER_FORCE_LE \
@@ -221,13 +219,13 @@ __DEFAULT_NO_OPTIONS = \
     SORT_THREADS \
     SVN \
     ZONEINFO_LEAPSECONDS_SUPPORT \
-    ZONEINFO_OLD_TIMEZONES_SUPPORT \
 
 __DEFAULT_NO_OPTIONS+= \
     LIBCHERI
 
 __DEFAULT_YES_OPTIONS+=	\
-	COMPAT_CHERIABI
+	COMPAT_CHERIABI \
+	CHERIBSDBOX
 
 # LEFT/RIGHT. Left options which default to "yes" unless their corresponding
 # RIGHT option is disabled.
@@ -235,6 +233,7 @@ __DEFAULT_DEPENDENT_OPTIONS= \
 	CLANG_FULL/CLANG \
 	LOADER_VERIEXEC/BEARSSL \
 	LOADER_EFI_SECUREBOOT/LOADER_VERIEXEC \
+	LOADER_VERIEXEC_VECTX/LOADER_VERIEXEC \
 	VERIEXEC/BEARSSL \
 
 # MK_*_SUPPORT options which default to "yes" unless their corresponding
@@ -263,15 +262,15 @@ __DEFAULT_DEPENDENT_OPTIONS+= ${var}_SUPPORT/${var}
 # Additional, per-target behavior should be rarely added only after much
 # gnashing of teeth and grinding of gears.
 #
-.if defined(TARGET_ARCH)
+# Note: we have to use MACHINE_ARCH in the bsd.compat.mk case (WANT_COMPAT)
+# since TARGET_ARCH is generally set on the make commandline and cannot be
+# overriden by bsd.compat.mk.
+.if defined(TARGET_ARCH) && !defined(WANT_COMPAT)
 __T=${TARGET_ARCH}
+__C=${TARGET_CPUTYPE}
 .else
 __T=${MACHINE_ARCH}
-.endif
-.if defined(TARGET)
-__TT=${TARGET}
-.else
-__TT=${MACHINE}
+__C=${CPUTYPE}
 .endif
 
 # All supported backends for LLVM_TARGET_XXX
@@ -281,15 +280,14 @@ __LLVM_TARGETS= \
 		mips \
 		powerpc \
 		riscv \
-		sparc \
 		x86
-__LLVM_TARGET_FILT=	C/(amd64|i386)/x86/:S/sparc64/sparc/:S/arm64/aarch64/:S/powerpc64/powerpc/
+__LLVM_TARGET_FILT=	C/(amd64|i386)/x86/:C/powerpc.*/powerpc/:C/armv[67]/arm/:C/riscv.*/riscv/:C/mips.*/mips/
 .for __llt in ${__LLVM_TARGETS}
 # Default enable the given TARGET's LLVM_TARGET support
-.if ${__TT:${__LLVM_TARGET_FILT}} == ${__llt}
+.if ${__T:${__LLVM_TARGET_FILT}} == ${__llt}
 __DEFAULT_YES_OPTIONS+=	LLVM_TARGET_${__llt:${__LLVM_TARGET_FILT}:tu}
 # aarch64 needs arm for -m32 support.
-.elif ${__TT} == "arm64" && ${__llt} == "arm"
+.elif ${__T} == "aarch64" && ${__llt:Marm*} != ""
 __DEFAULT_DEPENDENT_OPTIONS+=	LLVM_TARGET_ARM/LLVM_TARGET_AARCH64
 # Default the rest of the LLVM_TARGETs to the value of MK_LLVM_TARGET_ALL.
 .else
@@ -300,26 +298,11 @@ __DEFAULT_DEPENDENT_OPTIONS+=	LLVM_TARGET_${__llt:${__LLVM_TARGET_FILT}:tu}/LLVM
 __DEFAULT_NO_OPTIONS+=LLVM_TARGET_BPF
 
 .include <bsd.compiler.mk>
-# If the compiler is not C++11 capable, disable Clang.  External toolchain will
-# be required.
-
-.if ${COMPILER_FEATURES:Mc++11} && (${__TT} != "mips" && ${__TT} != "sparc64")
-# Clang is enabled, and will be installed as the default /usr/bin/cc.
-__DEFAULT_YES_OPTIONS+=CLANG CLANG_BOOTSTRAP CLANG_IS_CC LLD
-.elif ${COMPILER_FEATURES:Mc++11} && ${__T} != "sparc64" && !${__T:Mmips*c*}
-# If an external compiler that supports C++11 is used as ${CC} and Clang
-# supports the target, then Clang is enabled but we still require an external
-# toolchain.
-# default /usr/bin/cc.
-__DEFAULT_YES_OPTIONS+=CLANG LLD
-__DEFAULT_NO_OPTIONS+=CLANG_BOOTSTRAP CLANG_IS_CC
-.elif ${COMPILER_FEATURES:Mc++11} && ${__T:Mmips*c*}
-# CHERI pure-capability targets always use libc++
+.if ${__T:Mmips*c*}
 # Don't build CLANG for now
 __DEFAULT_NO_OPTIONS+=CLANG CLANG_IS_CC
 # Don't bootstrap clang, it isn't the version we want
 __DEFAULT_NO_OPTIONS+=CLANG_BOOTSTRAP
-__DEFAULT_NO_OPTIONS+=GPL_DTC
 __DEFAULT_NO_OPTIONS+=LLD
 # stand/libsa required -fno-pic which can't work with CHERI
 # XXXBD: we should build mips*c* as mips here, but punt for now
@@ -331,34 +314,25 @@ BROKEN_OPTIONS+=OFED
 # lib32 could probalby be made to work, but makes little sense
 # Must be broken for LIB64 to work while we can have only one LIBCOMPAT
 BROKEN_OPTIONS+=LIB32
-.else
-# Everything else disables Clang, and uses GCC instead.
-__DEFAULT_NO_OPTIONS+=CLANG CLANG_BOOTSTRAP CLANG_IS_CC LLD
 .endif
-# In-tree binutils/gcc are older versions without modern architecture support.
+
+.ifdef COMPAT_64BIT
+# ofed needs to be part of the default build for headers to be available.
+# Since it isn't yet working under purecap, disable it here.
+BROKEN_OPTIONS+=OFED
+.endif
+
+# In-tree gdb is an older versions without modern architecture support.
 .if ${__T} == "aarch64" || ${__T:Mriscv*} != ""
-BROKEN_OPTIONS+=BINUTILS BINUTILS_BOOTSTRAP GCC GCC_BOOTSTRAP GDB
+BROKEN_OPTIONS+=GDB
 .endif
 .if ${__T:Mriscv*} != ""
 BROKEN_OPTIONS+=OFED
-.endif
-.if ${__TT} != "mips" && ${__T} != "powerpc" && ${__T} != "powerpcspe" && \
-    ${__T} != "sparc64"
-__DEFAULT_YES_OPTIONS+=LLD_BOOTSTRAP LLD_IS_LD
-.else
-__DEFAULT_NO_OPTIONS+=LLD_BOOTSTRAP LLD_IS_LD
 .endif
 .if ${__T} == "aarch64" || ${__T} == "amd64" || ${__T} == "i386"
 __DEFAULT_YES_OPTIONS+=LLDB
 .else
 __DEFAULT_NO_OPTIONS+=LLDB
-.endif
-# GDB in base is generally less functional than GDB in ports.  Ports GDB
-# sparc64 kernel support has not been tested.
-.if ${__T} == "sparc64"
-__DEFAULT_NO_OPTIONS+=GDB_LIBEXEC
-.else
-__DEFAULT_YES_OPTIONS+=GDB_LIBEXEC
 .endif
 # LIB32 is supported on amd64, mips64, and powerpc64
 .if (${__T} == "amd64" || ${__T:Mmips64*} || ${__T} == "powerpc64")
@@ -380,25 +354,51 @@ BROKEN_OPTIONS+=LIB64
 BROKEN_OPTIONS+=LIBSOFT
 .endif
 .if ${__T:Mmips*}
-BROKEN_OPTIONS+=SSP
+# GOOGLETEST cannot currently be compiled on mips due to external circumstances.
+# Notably, the freebsd-gcc port isn't linking in libgcc so we end up trying ot
+# link to a hidden symbol. LLVM would successfully link this in, but some of
+# the mips variants are broken under LLVM until LLVM 10. GOOGLETEST should be
+# marked no longer broken with the switch to LLVM.
+BROKEN_OPTIONS+=GOOGLETEST SSP
 .endif
-# EFI doesn't exist on mips, powerpc, sparc or riscv.
-.if ${__T:Mmips*} || ${__T:Mpowerpc*} || ${__T:Msparc64} || ${__T:Mriscv*}
+
+.if ${__T:Mmips64*c*} || ${__T:Mriscv*c*}
+# nscd(8) caching depends on marshaling pointers to the daemon and back
+# and can't work without a rewrite.
+BROKEN_OPTIONS+=NS_CACHING
+.endif
+
+.if ${__T:Mriscv*c*}
+# Compiler crash:
+# Skip until https://github.com/CTSRD-CHERI/llvm-project/issues/379 is fixed.
+BROKEN_OPTIONS+=LIBCPLUSPLUS CXX
+# Crash in ZFS code. TODO: investigate
+BROKEN_OPTIONS+=CDDL
+
+# Some compilation failure: TODO: investigate
+BROKEN_OPTIONS+=SVN SVNLITE
+
+# libcheri has not been ported to RISCV
+BROKEN_OPTIONS+=LIBCHERI
+.endif
+
+# EFI doesn't exist on mips, powerpc or riscv.
+.if ${__T:Mmips*} || ${__T:Mpowerpc*} || ${__T:Mriscv*}
 BROKEN_OPTIONS+=EFI
 .endif
-# OFW is only for powerpc and sparc64, exclude others
-.if ${__T:Mpowerpc*} == "" && ${__T:Msparc64} == ""
+# OFW is only for powerpc, exclude others
+.if ${__T:Mpowerpc*} == ""
 BROKEN_OPTIONS+=LOADER_OFW
 .endif
 # UBOOT is only for arm, mips and powerpc, exclude others
 .if ${__T:Marm*} == "" && ${__T:Mmips*} == "" && ${__T:Mpowerpc*} == ""
 BROKEN_OPTIONS+=LOADER_UBOOT
 .endif
-# GELI and Lua in loader currently cause boot failures on sparc64 and powerpc.
+# GELI and Lua in loader currently cause boot failures on powerpc.
 # Further debugging is required -- probably they are just broken on big
 # endian systems generically (they jump to null pointers or try to read
 # crazy high addresses, which is typical of endianness problems).
-.if ${__T} == "sparc64" || ${__T:Mpowerpc*}
+.if ${__T:Mpowerpc*}
 BROKEN_OPTIONS+=LOADER_GELI LOADER_LUA
 .endif
 
@@ -407,7 +407,7 @@ BROKEN_OPTIONS+=LOADER_GELI LOADER_LUA
 BROKEN_OPTIONS+=PROFILE
 .endif
 .if ${__T} != "aarch64" && ${__T} != "amd64" && ${__T} != "i386" && \
-    ${__T} != "powerpc64" && ${__T} != "sparc64"
+    ${__T} != "powerpc64"
 BROKEN_OPTIONS+=CXGBETOOL
 BROKEN_OPTIONS+=MLX5TOOL
 .endif
@@ -417,7 +417,10 @@ __DEFAULT_YES_OPTIONS+=PIE
 __DEFAULT_NO_OPTIONS+=PIE
 .endif
 
-.if ${__T} != "mips64"
+# We'd really like this to be:
+#    !${MACHINE_CPU:Mcheri} || ${MACHINE_ABI:Mpurecap}
+# but that logic doesn't work in Makefile.inc1...
+.if ${__C} != "cheri" || (${__T:Mmips64*c*} || ${__T:Mriscv64*c*})
 BROKEN_OPTIONS+=COMPAT_CHERIABI
 .endif
 
@@ -437,20 +440,12 @@ BROKEN_OPTIONS+=HYPERV
 BROKEN_OPTIONS+=NVME
 .endif
 
-.if ${__T:Msparc64}
-# Sparc64 need extra crt*.o files - PR 239851
-BROKEN_OPTIONS+=BSD_CRTBEGIN
-# PR 233405
-BROKEN_OPTIONS+=LLVM_LIBUNWIND
-.endif
-
 # Doesn't link
 .if ${__T:Mmips*}
 BROKEN_OPTIONS+=GOOGLETEST
 .endif
 
-.if ${COMPILER_FEATURES:Mc++11} && \
-    (${__T} == "amd64" || ${__T} == "i386" || ${__T} == "powerpc64")
+.if ${__T} == "amd64" || ${__T} == "i386" || ${__T} == "powerpc64"
 __DEFAULT_YES_OPTIONS+=OPENMP
 .else
 __DEFAULT_NO_OPTIONS+=OPENMP
@@ -470,36 +465,9 @@ MK_GCC_BOOTSTRAP:=no
 .endif
 
 #
-# MK_* options that default to "yes" if the compiler is a C++11 compiler.
-#
-.for var in \
-    LIBCPLUSPLUS
-.if !defined(MK_${var})
-.if ${COMPILER_FEATURES:Mc++11}
-.if defined(WITHOUT_${var})
-MK_${var}:=	no
-.else
-MK_${var}:=	yes
-.endif
-.else
-.if defined(WITH_${var})
-MK_${var}:=	yes
-.else
-MK_${var}:=	no
-.endif
-.endif
-.endif
-.endfor
-
-#
 # Force some options off if their dependencies are off.
 # Order is somewhat important.
 #
-.if !${COMPILER_FEATURES:Mc++11}
-MK_GOOGLETEST:=	no
-MK_LLVM_LIBUNWIND:=	no
-.endif
-
 .if ${MK_CAPSICUM} == "no"
 MK_CASPER:=	no
 .endif
@@ -528,9 +496,9 @@ MK_KERBEROS_SUPPORT:=	no
 
 .if ${MK_CXX} == "no"
 MK_CLANG:=	no
-MK_GNUCXX:=	no
 MK_GOOGLETEST:=	no
 MK_TESTS:=	no
+MK_PMC:=	no
 .endif
 
 .if ${MK_DIALOG} == "no"
@@ -539,10 +507,6 @@ MK_BSDINSTALL:=	no
 
 .if ${MK_FILE} == "no"
 MK_SVNLITE:=	no
-.endif
-
-.if (${__TT} == "mips" || ${__TT} == "sparc64") && ${MK_GCC} == "no"
-MK_BINUTILS_BOOTSTRAP:=	no
 .endif
 
 .if ${MK_MAIL} == "no"
@@ -561,10 +525,15 @@ MK_NLS_CATALOGS:= no
 .endif
 
 .if ${MK_OPENSSL} == "no"
+MK_DMAGENT:=	no
 MK_OPENSSH:=	no
 MK_KERBEROS:=	no
 MK_KERBEROS_SUPPORT:=	no
 MK_LDNS:=	no
+MK_PKGBOOTSTRAP:=	no
+MK_SVN:=		no
+MK_SVNLITE:=		no
+MK_WIRELESS:=		no
 .endif
 
 .if ${MK_LDNS} == "no"
@@ -595,21 +564,16 @@ MK_GOOGLETEST:=	no
 
 .if ${MK_ZONEINFO} == "no"
 MK_ZONEINFO_LEAPSECONDS_SUPPORT:= no
-MK_ZONEINFO_OLD_TIMEZONES_SUPPORT:= no
 .endif
 
 .if ${MK_CROSS_COMPILER} == "no"
-MK_BINUTILS_BOOTSTRAP:= no
 MK_CLANG_BOOTSTRAP:= no
 MK_ELFTOOLCHAIN_BOOTSTRAP:= no
-MK_GCC_BOOTSTRAP:= no
 MK_LLD_BOOTSTRAP:= no
 .endif
 
 .if ${MK_TOOLCHAIN} == "no"
-MK_BINUTILS:=	no
 MK_CLANG:=	no
-MK_GCC:=	no
 MK_GDB:=	no
 MK_INCLUDES:=	no
 MK_LLD:=	no
@@ -624,12 +588,6 @@ MK_LLVM_COV:= no
 
 .if ${MK_LOADER_VERIEXEC} == "no"
 MK_LOADER_VERIEXEC_PASS_MANIFEST := no
-.endif
-
-# COMPAT_CHERIABI and LIBCHERI depend on CHERI support.
-.if ${MK_CHERI} == "no"
-MK_LIBCHERI:=	no
-MK_COMPAT_CHERIABI:=	no
 .endif
 
 #
@@ -650,20 +608,5 @@ MK_${vv:H}:=	${MK_${vv:T}}
 #
 # Set defaults for the MK_*_SUPPORT variables.
 #
-
-.if !${COMPILER_FEATURES:Mc++11}
-MK_LLDB:=	no
-.endif
-
-# gcc 4.8 and newer supports libc++, so suppress gnuc++ in that case.
-# while in theory we could build it with that, we don't want to do
-# that since it creates too much confusion for too little gain.
-# XXX: This is incomplete and needs X_COMPILER_TYPE/VERSION checks too
-#      to prevent Makefile.inc1 from bootstrapping unneeded dependencies
-#      and to support 'make delete-old' when supplying an external toolchain.
-.if ${COMPILER_TYPE} == "gcc" && ${COMPILER_VERSION} >= 40800
-MK_GNUCXX:=no
-MK_GCC:=no
-.endif
 
 .endif #  !target(__<src.opts.mk>__)

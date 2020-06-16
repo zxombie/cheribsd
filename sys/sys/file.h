@@ -201,10 +201,6 @@ struct file {
 	 *  DFLAG_SEEKABLE specific fields
 	 */
 	off_t		f_offset;
-	/*
-	 * Mandatory Access control information.
-	 */
-	void		*f_label;	/* Place-holder for MAC label. */
 };
 
 #define	f_cdevpriv	f_vnun.fvn_cdevpriv
@@ -248,7 +244,7 @@ extern int maxfilesperproc;	/* per process limit on number of open files */
 
 int fget(struct thread *td, int fd, cap_rights_t *rightsp, struct file **fpp);
 int fget_mmap(struct thread *td, int fd, cap_rights_t *rightsp,
-    u_char *maxprotp, struct file **fpp);
+    vm_prot_t *maxprotp, struct file **fpp);
 int fget_read(struct thread *td, int fd, cap_rights_t *rightsp,
     struct file **fpp);
 int fget_write(struct thread *td, int fd, cap_rights_t *rightsp,

@@ -111,6 +111,8 @@
 /* Forwards needed by prototypes below. */
 union ccb;
 struct bio;
+struct crypto_buffer;
+struct cryptop;
 struct mbuf;
 struct memdesc;
 struct pmap;
@@ -131,7 +133,13 @@ struct uio;
  *	are suitable for programming into DMA registers.
  */
 typedef struct bus_dma_segment {
-	bus_addr_t	ds_addr;	/* DMA address */
+	union {
+#ifdef _KERNEL
+		void * __capability ds_user_vaddr;
+#endif
+		void	 *ds_vaddr;	/* Virtual address. */
+		bus_addr_t ds_addr;	/* DMA address */
+	};
 	bus_size_t	ds_len;		/* length of transfer */
 } bus_dma_segment_t;
 
@@ -262,6 +270,17 @@ int bus_dmamap_load_ccb(bus_dma_tag_t dmat, bus_dmamap_t map, union ccb *ccb,
 int bus_dmamap_load_bio(bus_dma_tag_t dmat, bus_dmamap_t map, struct bio *bio,
 			bus_dmamap_callback_t *callback, void *callback_arg,
 			int flags);
+
+/*
+ * Like bus_dmamap_load but for crypto ops.
+ */
+int bus_dmamap_load_crp(bus_dma_tag_t dmat, bus_dmamap_t map,
+			struct cryptop *crp, bus_dmamap_callback_t *callback,
+			void *callback_arg, int flags);
+int bus_dmamap_load_crp_buffer(bus_dma_tag_t dmat, bus_dmamap_t map,
+			       struct crypto_buffer *cb,
+			       bus_dmamap_callback_t *callback,
+			       void *callback_arg, int flags);
 
 /*
  * Loads any memory descriptor.

@@ -35,7 +35,13 @@ enum sysdecode_abi {
 	SYSDECODE_ABI_LINUX,
 	SYSDECODE_ABI_LINUX32,
 	SYSDECODE_ABI_CLOUDABI64,
-	SYSDECODE_ABI_CLOUDABI32
+	SYSDECODE_ABI_CLOUDABI32,
+
+	/*
+	 * XXX: 100 is to avoid ABI issues in CheriBSD, would use next
+	 * value when merged upstream.
+	 */
+	SYSDECODE_ABI_FREEBSD64 = 100,
 };
 
 int	sysdecode_abi_to_freebsd_errno(enum sysdecode_abi _abi, int _error);
@@ -128,5 +134,6 @@ const char *sysdecode_vmresult(int _result);
 bool	sysdecode_wait4_options(FILE *_fp, int _options, int *_rem);
 bool	sysdecode_wait6_options(FILE *_fp, int _options, int *_rem);
 const char *sysdecode_whence(int _whence);
+bool	sysdecode_shmflags(FILE *_fp, int _flags, int *_rem);
 
 #endif /* !__SYSDECODE_H__ */

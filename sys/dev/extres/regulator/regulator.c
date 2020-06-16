@@ -51,7 +51,8 @@ __FBSDID("$FreeBSD$");
 
 #include "regdev_if.h"
 
-SYSCTL_NODE(_hw, OID_AUTO, regulator, CTLFLAG_RD, NULL, "Regulators");
+SYSCTL_NODE(_hw, OID_AUTO, regulator, CTLFLAG_RD | CTLFLAG_MPSAFE, NULL,
+    "Regulators");
 
 MALLOC_DEFINE(M_REGULATOR, "regulator", "Regulator framework");
 
@@ -191,16 +192,36 @@ regulator_shutdown(void *dummy)
 	int status, ret;
 	int disable = 1;
 
-	REG_TOPO_SLOCK();
 	TUNABLE_INT_FETCH("hw.regulator.disable_unused", &disable);
+	if (!disable)
+		return;
+	REG_TOPO_SLOCK();
+
+	if (bootverbose)
+		printf("regulator: shutting down unused regulators\n");
 	TAILQ_FOREACH(entry, &regnode_list, reglist_link) {
-		if (!entry->std_param.always_on && disable) {
-			if (bootverbose)
-				printf("regulator: shutting down %s\n",
-				    entry->name);
+		if (!entry->std_param.always_on) {
 			ret = regnode_status(entry, &status);
-			if (ret == 0 && status == REGULATOR_STATUS_ENABLED)
-				regnode_stop(entry, 0);
+			if (ret == 0 && status == REGULATOR_STATUS_ENABLED) {
+				if (bootverbose)
+					printf("regulator: shutting down %s... ",
+					    entry->name);
+				ret = regnode_stop(entry, 0);
+				if (bootverbose) {
+					/*
+					 * Call out busy in particular, here,
+					 * because it's not unexpected to fail
+					 * shutdown if the regulator is simply
+					 * in-use.
+					 */
+					if (ret == EBUSY)
+						printf("busy\n");
+					else if (ret != 0)
+						printf("error (%d)\n", ret);
+					else
+						printf("ok\n");
+				}
+			}
 		}
 	}
 	REG_TOPO_UNLOCK();
@@ -382,7 +403,7 @@ regnode_create(device_t pdev, regnode_class_t regnode_class,
 	regnode_oid = SYSCTL_ADD_NODE(&regnode->sysctl_ctx,
 	    SYSCTL_STATIC_CHILDREN(_hw_regulator),
 	    OID_AUTO, regnode->name,
-	    CTLFLAG_RD, 0, "A regulator node");
+	    CTLFLAG_RD | CTLFLAG_MPSAFE, 0, "A regulator node");
 
 	SYSCTL_ADD_INT(&regnode->sysctl_ctx,
 	    SYSCTL_CHILDREN(regnode_oid),
@@ -433,7 +454,7 @@ regnode_create(device_t pdev, regnode_class_t regnode_class,
 	SYSCTL_ADD_PROC(&regnode->sysctl_ctx,
 	    SYSCTL_CHILDREN(regnode_oid),
 	    OID_AUTO, "uvolt",
-	    CTLTYPE_INT | CTLFLAG_RD,
+	    CTLTYPE_INT | CTLFLAG_RD | CTLFLAG_NEEDGIANT,
 	    regnode, 0, regnode_uvolt_sysctl,
 	    "I",
 	    "Current voltage (in uV)");

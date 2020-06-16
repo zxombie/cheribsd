@@ -37,8 +37,6 @@ __FBSDID("$FreeBSD$");
 #include "opt_sctp.h"
 #include "opt_ktrace.h"
 
-#define	EXPLICIT_USER_ACCESS
-
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/capsicum.h>
@@ -332,14 +330,14 @@ kern_sys_sctp_generic_sendmsg(struct thread *td, int sd,
 		sinfop = &sinfo;
 	}
 
-	cap_rights_init(&rights, CAP_SEND);
+	cap_rights_init_one(&rights, CAP_SEND);
 	if (tolen != 0) {
 		error = getsockaddr(&to, uto, tolen);
 		if (error != 0) {
 			to = NULL;
 			goto sctp_bad2;
 		}
-		cap_rights_set(&rights, CAP_CONNECT);
+		cap_rights_set_one(&rights, CAP_CONNECT);
 	}
 
 	AUDIT_ARG_FD(sd);
@@ -498,14 +496,14 @@ kern_sctp_generic_sendmsg_iov(struct thread *td, int sd,
 			return (error);
 		sinfop = &sinfo;
 	}
-	cap_rights_init(&rights, CAP_SEND);
+	cap_rights_init_one(&rights, CAP_SEND);
 	if (tolen != 0) {
 		error = getsockaddr(&to, uto, tolen);
 		if (error != 0) {
 			to = NULL;
 			goto sctp_bad2;
 		}
-		cap_rights_set(&rights, CAP_CONNECT);
+		cap_rights_set_one(&rights, CAP_CONNECT);
 	}
 
 	AUDIT_ARG_FD(sd);

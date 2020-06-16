@@ -109,6 +109,13 @@
 	    __attribute__((__format__ (__printf0__, fmtarg, firstvararg)))
 #endif
 
+#ifndef __predict_true
+#define	__predict_true(exp)     __builtin_expect((exp), 1)
+#endif
+#ifndef __predict_false
+#define	__predict_false(exp)    __builtin_expect((exp), 0)
+#endif
+
 #ifndef __weak_reference
 #ifdef __ELF__
 #define	__weak_reference(sym,alias)	\
@@ -118,6 +125,18 @@
 #define __weak_reference(sym,alias)	\
     static int alias() __attribute__ ((weakref (#sym)));
 #endif
+#endif
+
+/* Some files built as part of the bootstrap libegacy use these macros, but
+ * since we aren't actually building libc.so, we can defined them to be empty */
+#ifndef __sym_compat
+#define	__sym_compat(sym,impl,verid)	/* not needed for bootstrapping */
+#endif
+#ifndef __sym_default
+#define	__sym_default(sym,impl,verid)	/* not needed for bootstrapping */
+#endif
+#ifndef __sym_default
+#define	__warn_references(sym,msg)	/* not needed for bootstrapping */
 #endif
 
 #ifndef __malloc_like

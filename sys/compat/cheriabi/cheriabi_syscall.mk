@@ -305,6 +305,7 @@ MIASM =  \
 	cheriabi_truncate.o \
 	ftruncate.o \
 	thr_kill2.o \
+	freebsd12_cheriabi_shm_open.o \
 	cheriabi_shm_unlink.o \
 	cheriabi_cpuset.o \
 	cpuset_setid.o \
@@ -329,7 +330,7 @@ MIASM =  \
 	cheriabi_jail_get.o \
 	cheriabi_jail_set.o \
 	jail_remove.o \
-	closefrom.o \
+	freebsd12_closefrom.o \
 	cheriabi___semctl.o \
 	cheriabi_msgctl.o \
 	cheriabi_shmctl.o \
@@ -388,4 +389,8 @@ MIASM =  \
 	cheriabi_copy_file_range.o \
 	cheriabi___sysctlbyname.o \
 	cheriabi_shm_open2.o \
-	cheriabi_shm_rename.o
+	cheriabi_shm_rename.o \
+	cheriabi_sigfastblock.o \
+	cheriabi___realpathat.o \
+	close_range.o \
+	cheriabi_rpctls_syscall.o

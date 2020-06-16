@@ -152,7 +152,8 @@ static void objlist_put_after(Objlist *, Obj_Entry *, Obj_Entry *);
 static void objlist_remove(Objlist *, Obj_Entry *);
 static int open_binary_fd(const char *argv0, bool search_in_path,
     const char **binpath_res);
-static int parse_args(char* argv[], int argc, bool *use_pathp, int *fdp);
+static int parse_args(char* argv[], int argc, bool *use_pathp, int *fdp,
+    const char **argv0);
 static int parse_integer(const char *);
 static void *path_enumerate(const char *, path_enum_proc, const char *, void *);
 static void print_usage(const char *argv0);
@@ -228,7 +229,7 @@ static char *ld_utrace;		/* Use utrace() to log events. */
 static bool ld_skip_init_funcs = false;	/* XXXAR: debug environment variable to verify relocation processing */
 static struct obj_entry_q obj_list;	/* Queue of all loaded objects */
 static Obj_Entry *obj_main;	/* The main program shared object */
-#ifndef __CHERI_PURE_CAPABILITY__
+#if !defined(__mips__) || !defined(__CHERI_PURE_CAPABILITY__)
 static
 #endif
 Obj_Entry obj_rtld;	/* The dynamic linker shared object */
@@ -307,6 +308,7 @@ Elf_Addr tls_dtv_generation = 1;	/* Used to detect when dtv size changes */
 int tls_max_index = 1;		/* Largest module index allocated */
 
 static bool ld_library_path_rpath = false;
+bool ld_fast_sigblock = false;
 
 /*
  * Globals for path names, and such
@@ -501,6 +503,10 @@ _rtld(Elf_Addr *sp, func_ptr_type *exit_proc, Obj_Entry **objp)
     main_argc = argc;
     main_argv = argv;
 
+    if (aux_info[AT_BSDFLAGS] != NULL &&
+	(aux_info[AT_BSDFLAGS]->a_un.a_val & ELF_BSDF_SIGFASTBLK) != 0)
+	    ld_fast_sigblock = true;
+
     trust = !issetugid();
 
     md_abi_variant_hook(aux_info);
@@ -519,8 +525,7 @@ _rtld(Elf_Addr *sp, func_ptr_type *exit_proc, Obj_Entry **objp)
 	    }
 	    dbg("opening main program in direct exec mode");
 	    if (argc >= 2) {
-		rtld_argc = parse_args(argv, argc, &search_in_path, &fd);
-		argv0 = argv[rtld_argc];
+		rtld_argc = parse_args(argv, argc, &search_in_path, &fd, &argv0);
 		explicit_fd = (fd != -1);
 		binpath = NULL;
 		if (!explicit_fd)
@@ -919,14 +924,6 @@ _rtld(Elf_Addr *sp, func_ptr_type *exit_proc, Obj_Entry **objp)
 
     lock_release(rtld_bind_lock, &lockstate);
 
-#if defined(__CHERI_PURE_CAPABILITY__) && !defined(__CHERI_CAPABILITY_TABLE__)
-    // In the legacy ABI we don't shrink the bounds at all since
-    // we use cgetsetoffset to call into other libraries ...
-    dbg("Increasing bounds on obj_main->entry in legacy ABI:");
-    dbg("\tbefore: " PTR_FMT, obj_main->entry);
-    obj_main->entry = cheri_copyaddress(cheri_getpcc(), obj_main->entry);
-    dbg("\tafter: " PTR_FMT, obj_main->entry);
-#endif
     dbg("transferring control to program entry point = " PTR_FMT, obj_main->entry);
 
     /* Return the exit procedure and the program entry point. */
@@ -935,7 +932,7 @@ _rtld(Elf_Addr *sp, func_ptr_type *exit_proc, Obj_Entry **objp)
     *exit_proc = rtld_exit_ptr;
     *objp = obj_main;
 
-#ifdef __CHERI_PURE_CAPABILITY__
+#if defined(__mips__) && defined(__CHERI_PURE_CAPABILITY__)
     // ensure that we setup a valid $cgp if the binary is built with -nostartfiles
     // Note: This value should still remain valid after the return since clang
     // won't clobber it. This should ensure that on return from here to
@@ -1329,6 +1326,9 @@ digest_dynamic1(Obj_Entry *obj, int early, const Elf_Dyn **dyn_rpath,
 
 		*needed_filtees_tail = nep;
 		needed_filtees_tail = &nep->next;
+
+		if (obj->linkmap.l_refname == NULL)
+		    obj->linkmap.l_refname = (char *)(uintptr_t)dynp->d_un.d_val;
 	    }
 	    break;
 
@@ -1377,19 +1377,19 @@ digest_dynamic1(Obj_Entry *obj, int early, const Elf_Dyn **dyn_rpath,
 	    break;
 
 	case DT_PREINIT_ARRAY:
-	    obj->preinit_array_ptr = (Elf_Addr *)(obj->relocbase + dynp->d_un.d_ptr);
+	    obj->preinit_array_ptr = (InitArrayEntry *)(obj->relocbase + dynp->d_un.d_ptr);
 	    break;
 
 	case DT_PREINIT_ARRAYSZ:
-	    obj->preinit_array_num = dynp->d_un.d_val / sizeof(Elf_Addr);
+	    obj->preinit_array_num = dynp->d_un.d_val / sizeof(InitArrayEntry);
 	    break;
 
 	case DT_INIT_ARRAY:
-	    obj->init_array_ptr = (Elf_Addr *)(obj->relocbase + dynp->d_un.d_ptr);
+	    obj->init_array_ptr = (InitArrayEntry *)(obj->relocbase + dynp->d_un.d_ptr);
 	    break;
 
 	case DT_INIT_ARRAYSZ:
-	    obj->init_array_num = dynp->d_un.d_val / sizeof(Elf_Addr);
+	    obj->init_array_num = dynp->d_un.d_val / sizeof(InitArrayEntry);
 	    break;
 
 	case DT_FINI:
@@ -1397,67 +1397,12 @@ digest_dynamic1(Obj_Entry *obj, int early, const Elf_Dyn **dyn_rpath,
 	    break;
 
 	case DT_FINI_ARRAY:
-	    obj->fini_array_ptr = (Elf_Addr *)(obj->relocbase + dynp->d_un.d_ptr);
+	    obj->fini_array_ptr = (InitArrayEntry *)(obj->relocbase + dynp->d_un.d_ptr);
 	    break;
 
 	case DT_FINI_ARRAYSZ:
-	    obj->fini_array_num = dynp->d_un.d_val / sizeof(Elf_Addr);
+	    obj->fini_array_num = dynp->d_un.d_val / sizeof(InitArrayEntry);
 	    break;
-
-#ifdef __CHERI_PURE_CAPABILITY__
-	case DT_MIPS_CHERI___CAPRELOCS:
-	    obj->cap_relocs = (obj->relocbase + dynp->d_un.d_ptr);
-	    break;
-
-	case DT_MIPS_CHERI___CAPRELOCSSZ:
-	    obj->cap_relocs_size = dynp->d_un.d_val;
-	    break;
-
-	case DT_MIPS_CHERI_FLAGS: {
-	    size_t flags = dynp->d_un.d_val;
-	    unsigned abi = flags & DF_MIPS_CHERI_ABI_MASK;
-	    obj->cheri_captable_abi = abi;
-	    flags &= ~DF_MIPS_CHERI_ABI_MASK;
-	    if (flags & DF_MIPS_CHERI_RELATIVE_CAPRELOCS) {
-		flags &= ~DF_MIPS_CHERI_RELATIVE_CAPRELOCS;
-		obj->relative_cap_relocs = true;
-	    }
-	    if ((flags & DF_MIPS_CHERI_CAPTABLE_PER_FILE) ||
-	        (flags & DF_MIPS_CHERI_CAPTABLE_PER_FUNC)) {
-#if RTLD_SUPPORT_PER_FUNCTION_CAPTABLE == 1
-		obj->per_function_captable = true;
-#else
-		rtld_fatal("Cannot load %s with per-file/per-function "
-		    "captable since " _PATH_RTLD " was not compiled with "
-		    "-DRTLD_SUPPORT_PER_FUNCTION_CAPTABLE=1", obj->path);
-#endif
-	    } else if (flags) {
-		rtld_fdprintf(STDERR_FILENO, "Unknown DT_MIPS_CHERI_FLAGS in %s"
-		    ": 0x%zx", obj->path, (size_t)flags);
-	    }
-	    break;
-	}
-
-	case DT_MIPS_CHERI_CAPTABLE:
-	    obj->writable_captable =
-	        (struct CheriCapTableEntry*)(obj->relocbase + dynp->d_un.d_ptr);
-	    break;
-
-	case DT_MIPS_CHERI_CAPTABLESZ:
-	    obj->captable_size = dynp->d_un.d_val;
-	    break;
-
-#if RTLD_SUPPORT_PER_FUNCTION_CAPTABLE == 1
-	case DT_MIPS_CHERI_CAPTABLE_MAPPING:
-	    obj->captable_mapping =
-	        (struct CheriCapTableMappingEntry*)(obj->relocbase + dynp->d_un.d_ptr);
-	    break;
-
-	case DT_MIPS_CHERI_CAPTABLE_MAPPINGSZ:
-	    obj->captable_mapping_size = dynp->d_un.d_val;
-	    break;
-#endif /* RTLD_SUPPORT_PER_FUNCTION_CAPTABLE == 1 */
-#endif /* defined(__CHERI_PURE_CAPABILITY__) */
 
 	/*
 	 * Don't process DT_DEBUG on MIPS as the dynamic section
@@ -1525,6 +1470,60 @@ digest_dynamic1(Obj_Entry *obj, int early, const Elf_Dyn **dyn_rpath,
 		    dynp->d_un.d_ptr);
 		break;
 
+#ifdef __CHERI_PURE_CAPABILITY__
+	case DT_MIPS_CHERI___CAPRELOCS:
+	    obj->cap_relocs = (obj->relocbase + dynp->d_un.d_ptr);
+	    break;
+
+	case DT_MIPS_CHERI___CAPRELOCSSZ:
+	    obj->cap_relocs_size = dynp->d_un.d_val;
+	    break;
+
+	case DT_MIPS_CHERI_FLAGS: {
+	    size_t flags = dynp->d_un.d_val;
+	    unsigned abi = flags & DF_MIPS_CHERI_ABI_MASK;
+	    obj->cheri_captable_abi = abi;
+	    flags &= ~DF_MIPS_CHERI_ABI_MASK;
+	    if (flags & DF_MIPS_CHERI_RELATIVE_CAPRELOCS) {
+		flags &= ~DF_MIPS_CHERI_RELATIVE_CAPRELOCS;
+		obj->relative_cap_relocs = true;
+	    }
+	    if ((flags & DF_MIPS_CHERI_CAPTABLE_PER_FILE) ||
+	        (flags & DF_MIPS_CHERI_CAPTABLE_PER_FUNC)) {
+#if RTLD_SUPPORT_PER_FUNCTION_CAPTABLE == 1
+		obj->per_function_captable = true;
+#else
+		rtld_fatal("Cannot load %s with per-file/per-function "
+		    "captable since " _PATH_RTLD " was not compiled with "
+		    "-DRTLD_SUPPORT_PER_FUNCTION_CAPTABLE=1", obj->path);
+#endif
+	    } else if (flags) {
+		rtld_fdprintf(STDERR_FILENO, "Unknown DT_MIPS_CHERI_FLAGS in %s"
+		    ": 0x%zx", obj->path, (size_t)flags);
+	    }
+	    break;
+	}
+
+	case DT_MIPS_CHERI_CAPTABLE:
+	    obj->writable_captable =
+	        (struct CheriCapTableEntry*)(obj->relocbase + dynp->d_un.d_ptr);
+	    break;
+
+	case DT_MIPS_CHERI_CAPTABLESZ:
+	    obj->captable_size = dynp->d_un.d_val;
+	    break;
+
+#if RTLD_SUPPORT_PER_FUNCTION_CAPTABLE == 1
+	case DT_MIPS_CHERI_CAPTABLE_MAPPING:
+	    obj->captable_mapping =
+	        (struct CheriCapTableMappingEntry*)(obj->relocbase + dynp->d_un.d_ptr);
+	    break;
+
+	case DT_MIPS_CHERI_CAPTABLE_MAPPINGSZ:
+	    obj->captable_mapping_size = dynp->d_un.d_val;
+	    break;
+#endif /* RTLD_SUPPORT_PER_FUNCTION_CAPTABLE == 1 */
+#endif /* defined(__CHERI_PURE_CAPABILITY__) */
 #endif
 
 #ifdef __powerpc__
@@ -1535,6 +1534,18 @@ digest_dynamic1(Obj_Entry *obj, int early, const Elf_Dyn **dyn_rpath,
 #else
 	case DT_PPC_GOT:
 		obj->gotptr = (Elf_Addr *)(obj->relocbase + dynp->d_un.d_ptr);
+		break;
+#endif
+#endif
+
+#ifdef __riscv
+#ifdef __CHERI_PURE_CAPABILITY__
+	case DT_RISCV_CHERI___CAPRELOCS:
+		obj->cap_relocs = (obj->relocbase + dynp->d_un.d_ptr);
+		break;
+
+	case DT_RISCV_CHERI___CAPRELOCSSZ:
+		obj->cap_relocs_size = dynp->d_un.d_val;
 		break;
 #endif
 #endif
@@ -1556,6 +1567,8 @@ digest_dynamic1(Obj_Entry *obj, int early, const Elf_Dyn **dyn_rpath,
 		    obj->z_interpose = true;
 		if (dynp->d_un.d_val & DF_1_NODEFLIB)
 		    obj->z_nodeflib = true;
+		if (dynp->d_un.d_val & DF_1_PIE)
+		    obj->z_pie = true;
 	    break;
 
 	default:
@@ -1591,6 +1604,10 @@ digest_dynamic1(Obj_Entry *obj, int early, const Elf_Dyn **dyn_rpath,
 	}
 	obj->dynsymcount += obj->symndx_gnu;
     }
+
+    if (obj->linkmap.l_refname != NULL)
+	obj->linkmap.l_refname = obj->strtab + (unsigned long)obj->
+	  linkmap.l_refname;
 }
 
 static bool
@@ -1631,12 +1648,25 @@ digest_dynamic2(Obj_Entry *obj, const Elf_Dyn *dyn_rpath,
 	set_bounds_if_nonnull(obj->strtab, obj->strsize);
 	set_bounds_if_nonnull(obj->phdr, obj->phsize);
 
-	set_bounds_if_nonnull(obj->preinit_array_ptr, obj->preinit_array_num * sizeof(Elf_Addr));
-	set_bounds_if_nonnull(obj->init_array_ptr, obj->init_array_num * sizeof(Elf_Addr));
-	set_bounds_if_nonnull(obj->fini_array_ptr, obj->fini_array_num * sizeof(Elf_Addr));
+	set_bounds_if_nonnull(obj->preinit_array_ptr,
+	    obj->preinit_array_num * sizeof(InitArrayEntry));
+	set_bounds_if_nonnull(
+	    obj->init_array_ptr, obj->init_array_num * sizeof(InitArrayEntry));
+	set_bounds_if_nonnull(
+	    obj->fini_array_ptr, obj->fini_array_num * sizeof(InitArrayEntry));
 
 	set_bounds_if_nonnull(obj->cap_relocs, obj->cap_relocs_size);
+
+	/* TODO: Bring the useful ABI features to RISC-V */
+#ifdef __mips__
 	set_bounds_if_nonnull(obj->writable_captable, obj->captable_size);
+	if (cheri_getlength(obj->writable_captable) != obj->captable_size) {
+		dbg("Using imprecise bounds for captable: " PTR_FMT
+		    " - size was %zd but real size should be %zd",
+		    obj->writable_captable,
+		    cheri_getlength(obj->writable_captable),
+		    obj->captable_size);
+	}
 #if RTLD_SUPPORT_PER_FUNCTION_CAPTABLE == 1
 	set_bounds_if_nonnull(obj->captable_mapping, obj->captable_mapping_size);
 #endif
@@ -1644,54 +1674,69 @@ digest_dynamic2(Obj_Entry *obj, const Elf_Dyn *dyn_rpath,
 	if (obj->writable_captable)
 		obj->_target_cgp = cheri_clearperm(obj->writable_captable, TARGET_CGP_REMOVE_PERMS);
 
-	// Now reduce the bounds on text_rodata_cap:  I, and for PLT/FNDESC we can set tight bounds
-	// so we only need .text
+	// Now reduce the bounds on text_rodata_cap: for PLT/FNDESC we can set
+	// tight bounds and only need .text, but for PC-relative we have to also
+	// include the captable since the text/rodata capability is used for
+	// all code pointers, and functions need to be able to access the
+	// captable from PCC.
 	if (obj->cheri_captable_abi == DF_MIPS_CHERI_ABI_PCREL) {
-		// For pcrel ABI we need to include captable as well
+		// For pcrel ABI we need to include the captable
 		dbg("%s: text/rodata start = %#zx, text/rodata end = %#zx, "
-		    "captable = " PTR_FMT " (relative to start %#zx)", obj->path,
-		    (size_t)obj->text_rodata_start, (size_t)obj->text_rodata_end,
-		    obj->writable_captable, (char*)obj->writable_captable - obj->text_rodata_cap);
+		    "captable = " PTR_FMT " (relative to start %#zx), "
+		    "current text/rodata cap = " PTR_FMT,
+		    obj->path, (size_t)obj->text_rodata_start_offset,
+		    (size_t)obj->text_rodata_end_offset, obj->writable_captable,
+		    (char *)obj->writable_captable - obj->text_rodata_cap,
+		    obj->text_rodata_cap);
 		if (obj->writable_captable) {
-			vaddr_t start = rtld_min(obj->text_rodata_start,
-			    (vaddr_t)((char*)obj->writable_captable - obj->text_rodata_cap));
-			vaddr_t end = rtld_max(obj->text_rodata_end,
-			    (vaddr_t)(((char*)obj->writable_captable +
-			    cheri_getlen(obj->writable_captable)) - obj->text_rodata_cap));
-			obj->text_rodata_cap += start;
-			obj->text_rodata_cap = cheri_csetbounds_sametype(
-			    obj->text_rodata_cap, end - start);
+			// Note: due to capabilities not being precise, the end
+			// of the captable may not be the same as captable +
+			// cheri_getlen(captable). Use the value we got from
+			// DT_MIPS_CHERI_CAPTABLESZ instead
+			vaddr_t captable_start_offset = (vaddr_t)(
+			    (char *)obj->writable_captable - obj->relocbase);
+			rtld_min(obj->text_rodata_start_offset,
+			    (vaddr_t)((char *)obj->writable_captable -
+				obj->text_rodata_cap));
+			vaddr_t captable_end_offset =
+			    captable_start_offset + obj->captable_size;
+			// Set base to min_offset(.text/.rodata, .captable)
+			vaddr_t start_offset = rtld_min(captable_start_offset,
+			    obj->text_rodata_start_offset);
+			size_t end_offset = rtld_max(
+			    captable_end_offset, obj->text_rodata_end_offset);
+			size_t precise_size = end_offset - start_offset;
+			// Note: not setting precise bounds here since the end
+			// of the captable is probably not strongly aligned.
+			obj->text_rodata_cap += start_offset;
+			obj->text_rodata_cap = cheri_setbounds_sametype(
+			    obj->text_rodata_cap, precise_size);
+			if (cheri_getlength(obj->text_rodata_cap) !=
+			    precise_size) {
+				dbg("Using imprecise bounds for text/rodata"
+				    "/captable: " PTR_FMT
+				    " - size was %zd but real size should be %zd",
+				    obj->text_rodata_cap,
+				    cheri_getlength(obj->text_rodata_cap),
+				    precise_size);
+			}
 		} else {
 			dbg("%s: missing DT_CHERI_CAPTABLE so can't set "
 			    "sensible bounds on text/rodata -> using full DSO"
 			    ": " PTR_FMT, obj->path, obj->text_rodata_cap);
 		}
-	} else if (obj->cheri_captable_abi == DF_MIPS_CHERI_ABI_LEGACY) {
-#ifdef __CHERI_CAPABILITY_TABLE__
-		rtld_fatal("Cannot load legacy object %s with captable RTLD "
-		    "because it needs an unbounded $pcc. If the program is "
-		    "actually cap-table please update your toolchain so that "
-		    "the output binaries have the correct DT_MIPS_CHERI_FLAGS",
-		    obj->path);
-#endif
-		// In the legacy ABI we don't shrink the bounds at all since
-		// we use cgetsetoffset to call into other libraries ...
-		dbg("Increasing bounds text_rodata_cap in legacy ABI:");
-		dbg("\tbefore: " PTR_FMT, obj->text_rodata_cap);
-		obj->text_rodata_cap = cheri_copyaddress(cheri_getpcc(),
-		    obj->text_rodata_cap);
-		dbg("\tafter: " PTR_FMT, obj->text_rodata_cap);
 	} else {
 		// tight bounds on text_rodata possible since $cgp is live-in
-		obj->text_rodata_cap += obj->text_rodata_start;
+		obj->text_rodata_cap += obj->text_rodata_start_offset;
 		// TODO: data-only .so files? Possibly used by icu4c? For now
 		// I'll keep this assertion until we hit an error
-		rtld_require(obj->text_rodata_end != 0, "No text segment in %s?", obj->path);
-		obj->text_rodata_cap = cheri_csetbounds_sametype(
-		   obj->text_rodata_cap, obj->text_rodata_end - obj->text_rodata_start);
+		rtld_require(obj->text_rodata_end_offset != 0, "No text segment in %s?", obj->path);
+		obj->text_rodata_cap = cheri_setbounds_sametype(
+		   obj->text_rodata_cap, obj->text_rodata_end_offset - obj->text_rodata_start_offset);
 	}
 	dbg("%s: tightened bounds of text/rodata cap: " PTR_FMT, obj->path,
 	    obj->text_rodata_cap);
+#endif /* defined(__mips__) */
 #endif
 	return (true);
 }
@@ -1730,7 +1775,7 @@ digest_phdr(const Elf_Phdr *phdr, int phnum, dlfunc_t entry, const char *path)
 
 	obj->phsize = ph->p_memsz;
 #ifdef __CHERI_PURE_CAPABILITY__
-	obj->phdr = cheri_csetbounds(phdr, ph->p_memsz);
+	obj->phdr = cheri_setbounds(phdr, ph->p_memsz);
 #else
 	obj->phdr = phdr;
 #endif
@@ -1776,11 +1821,11 @@ digest_phdr(const Elf_Phdr *phdr, int phnum, dlfunc_t entry, const char *path)
 #ifdef __CHERI_PURE_CAPABILITY__
 	    if (!(ph->p_flags & PF_W)) {
 		Elf_Addr start_addr = ph->p_vaddr;
-		obj->text_rodata_start = rtld_min(start_addr, obj->text_rodata_start);
-		obj->text_rodata_end = rtld_max(start_addr + ph->p_memsz, obj->text_rodata_end);
+		obj->text_rodata_start_offset = rtld_min(start_addr, obj->text_rodata_start_offset);
+		obj->text_rodata_end_offset = rtld_max(start_addr + ph->p_memsz, obj->text_rodata_end_offset);
 		dbg("%s: processing readonly PT_LOAD[%d], new text/rodata start "
 		    " = %zx text/rodata end = %zx", path, nsegs,
-		    (size_t)obj->text_rodata_start, (size_t)obj->text_rodata_end);
+		    (size_t)obj->text_rodata_start_offset, (size_t)obj->text_rodata_end_offset);
 	    }
 #endif
 	    break;
@@ -1795,6 +1840,7 @@ digest_phdr(const Elf_Phdr *phdr, int phnum, dlfunc_t entry, const char *path)
 	    obj->tlsalign = ph->p_align;
 	    obj->tlsinitsize = ph->p_filesz;
 	    obj->tlsinit = (void*)(ph->p_vaddr + obj->relocbase);
+	    obj->tlspoffset = ph->p_offset;
 	    break;
 
 	case PT_GNU_STACK:
@@ -1805,11 +1851,11 @@ digest_phdr(const Elf_Phdr *phdr, int phnum, dlfunc_t entry, const char *path)
 	    obj->relro_page = obj->relocbase + trunc_page(ph->p_vaddr);
 	    obj->relro_size = round_page(ph->p_memsz);
 #ifdef __CHERI_PURE_CAPABILITY__
-	    obj->text_rodata_start = rtld_min(ph->p_vaddr, obj->text_rodata_start);
-	    obj->text_rodata_end = rtld_max(ph->p_vaddr + ph->p_memsz, obj->text_rodata_end);
+	    obj->text_rodata_start_offset = rtld_min(ph->p_vaddr, obj->text_rodata_start_offset);
+	    obj->text_rodata_end_offset = rtld_max(ph->p_vaddr + ph->p_memsz, obj->text_rodata_end_offset);
 	    dbg("%s: Adding PT_GNU_RELRO, new text/rodata start "
 		" = %zx text/rodata end = %zx", path,
-		(size_t)obj->text_rodata_start, (size_t)obj->text_rodata_end);
+		(size_t)obj->text_rodata_start_offset, (size_t)obj->text_rodata_end_offset);
 #endif
 	    break;
 
@@ -1826,7 +1872,7 @@ digest_phdr(const Elf_Phdr *phdr, int phnum, dlfunc_t entry, const char *path)
     }
 
 #ifdef __CHERI_PURE_CAPABILITY__
-   obj->relocbase = cheri_csetbounds(obj->relocbase, obj->mapsize);
+   obj->relocbase = cheri_setbounds(obj->relocbase, obj->mapsize);
     /*
      * Derive text_rodata cap from AT_ENTRY (but set the address to the beginning
      * of the object). Note: csetbounds is done after parsing .dynamic
@@ -2512,13 +2558,13 @@ init_rtld(caddr_t mapbase, Elf_Auxinfo **aux_info)
 	    continue;
 	if (!(ph->p_flags & PF_W)) {
 	    Elf_Addr start_addr = ph->p_vaddr;
-	    objtmp.text_rodata_start = rtld_min(start_addr, objtmp.text_rodata_start);
-	    objtmp.text_rodata_end = rtld_max(start_addr + ph->p_memsz, objtmp.text_rodata_end);
+	    objtmp.text_rodata_start_offset = rtld_min(start_addr, objtmp.text_rodata_start_offset);
+	    objtmp.text_rodata_end_offset = rtld_max(start_addr + ph->p_memsz, objtmp.text_rodata_end_offset);
 #if defined(DEBUG_VERBOSE) && DEBUG_VERBOSE > 3
 	    /* debug is not initialized yet so dbg() is a no-op */
 	    rtld_fdprintf(STDERR_FILENO, "rtld: processing PT_LOAD phdr[%d], "
 		"new text/rodata start  = %zx text/rodata end = %zx\n", i + 1,
-		(size_t)objtmp.text_rodata_start, (size_t)objtmp.text_rodata_end);
+		(size_t)objtmp.text_rodata_start_offset, (size_t)objtmp.text_rodata_end_offset);
 #endif
 	}
     }
@@ -2934,6 +2980,10 @@ do_load_object(int fd, const char *name, char *path, struct stat *sbp,
     obj->path = path;
     if (!digest_dynamic(obj, 0))
 	goto errp;
+    if (obj->z_pie) {
+	_rtld_error("Cannot load PIE binary %s as DSO", obj->path);
+	goto errp;
+    }
     dbg("%s valid_hash_sysv %d valid_hash_gnu %d dynsymcount %d", obj->path,
 	obj->valid_hash_sysv, obj->valid_hash_gnu, obj->dynsymcount);
     if (obj->z_noopen && (flags & (RTLD_LO_DLOPEN | RTLD_LO_TRACE)) ==
@@ -2984,7 +3034,7 @@ obj_from_addr(const void *addr)
 static void
 preinit_main(void)
 {
-    Elf_Addr *preinit_addr;
+    InitArrayEntry *preinit_addr;
     int index;
 
     preinit_addr = obj_main->preinit_array_ptr;
@@ -2992,11 +3042,11 @@ preinit_main(void)
 	return;
 
     for (index = 0; index < obj_main->preinit_array_num; index++) {
-	if (preinit_addr[index] != 0 && preinit_addr[index] != 1) {
-	    dbg("calling preinit function for %s at %lx", obj_main->path,
-		preinit_addr[index]);
+	if (preinit_addr[index].value != 0 && preinit_addr[index].value != 1) {
+	    dbg("calling preinit function for %s at %p", obj_main->path,
+		(void*)(uintptr_t)preinit_addr[index].value);
 	    LD_UTRACE(UTRACE_INIT_CALL, obj_main,
-	      (void *)(intptr_t)preinit_addr[index], 0, 0, obj_main->path);
+	      (void *)(intptr_t)preinit_addr[index].value, 0, 0, obj_main->path);
 	    call_init_array_pointer(obj_main, preinit_addr[index]);
 	}
     }
@@ -3014,7 +3064,7 @@ objlist_call_fini(Objlist *list, Obj_Entry *root, RtldLockState *lockstate)
 {
     Objlist_Entry *elm;
     char *saved_msg;
-    Elf_Addr *fini_addr;
+    InitArrayEntry *fini_addr;
     int index;
 
     assert(root == NULL || root->refcount == 1);
@@ -3048,11 +3098,11 @@ objlist_call_fini(Objlist *list, Obj_Entry *root, RtldLockState *lockstate)
 	    if (fini_addr != NULL && elm->obj->fini_array_num > 0) {
 		for (index = elm->obj->fini_array_num - 1; index >= 0;
 		  index--) {
-		    if (fini_addr[index] != 0 && fini_addr[index] != 1) {
-			dbg("calling fini_array function for %s at %lx",
-			    elm->obj->path, fini_addr[index]);
+		    if (fini_addr[index].value != 0 && fini_addr[index].value != 1) {
+			dbg("calling fini_array function for %s at %p",
+			    elm->obj->path, (void*)(uintptr_t)fini_addr[index].value);
 			LD_UTRACE(UTRACE_FINI_CALL, elm->obj,
-			    (void *)(intptr_t)fini_addr[index], 0, 0, elm->obj->path);
+			    (void *)(intptr_t)fini_addr[index].value, 0, 0, elm->obj->path);
 			call_fini_array_pointer(elm->obj, fini_addr[index]);
 		    }
 		}
@@ -3091,7 +3141,7 @@ objlist_call_init(Objlist *list, RtldLockState *lockstate)
     Objlist_Entry *elm;
     Obj_Entry *obj;
     char *saved_msg;
-    Elf_Addr *init_addr;
+    InitArrayEntry *init_addr;
     void (*reg)(void (*)(void));
     int index;
 
@@ -3152,11 +3202,11 @@ objlist_call_init(Objlist *list, RtldLockState *lockstate)
 	init_addr = elm->obj->init_array_ptr;
 	if (init_addr != NULL) {
 	    for (index = 0; index < elm->obj->init_array_num; index++) {
-		if (init_addr[index] != 0 && init_addr[index] != 1) {
+		if (init_addr[index].value != 0 && init_addr[index].value != 1) {
 		    dbg("calling init array function for %s at %p", elm->obj->path,
-			(void *)(uintptr_t)init_addr[index]);
+			(void *)(uintptr_t)init_addr[index].value);
 		    LD_UTRACE(UTRACE_INIT_CALL, elm->obj,
-			(void *)(uintptr_t)init_addr[index], 0, 0, elm->obj->path);
+			(void *)(uintptr_t)init_addr[index].value, 0, 0, elm->obj->path);
 		    call_init_array_pointer(elm->obj, init_addr[index]);
 		}
 	    }
@@ -3345,7 +3395,7 @@ relocate_object(Obj_Entry *obj, bool bind_now, Obj_Entry *rtldobj,
 	init_pltgot(obj);
 
 	/* Process the PLT relocations. */
-#ifdef __CHERI_PURE_CAPABILITY__
+#if defined(__mips__) && defined(__CHERI_PURE_CAPABILITY__)
 	/* No reloc_jmpslots for CHERI since it works differently: if BIND_NOW
 	 * is set, reloc_plt can avoid allocating trampolines for pc-rel code */
 	if (reloc_plt(obj, (obj->bind_now || bind_now), flags, rtldobj,
@@ -3418,10 +3468,13 @@ resolve_object_ifunc(Obj_Entry *obj, bool bind_now, int flags,
 	if (obj->ifuncs_resolved)
 		return (0);
 	obj->ifuncs_resolved = true;
-	if (!obj->irelative && !((obj->bind_now || bind_now) && obj->gnu_ifunc))
+	if (!obj->irelative && !obj->irelative_nonplt &&
+	    !((obj->bind_now || bind_now) && obj->gnu_ifunc))
 		return (0);
 	if (obj_disable_relro(obj) == -1 ||
 	    (obj->irelative && reloc_iresolve(obj, lockstate) == -1) ||
+	    (obj->irelative_nonplt && reloc_iresolve_nonplt(obj,
+	    lockstate) == -1) ||
 	    ((obj->bind_now || bind_now) && obj->gnu_ifunc &&
 	    reloc_gnu_ifunc(obj, flags, lockstate) == -1) ||
 	    obj_enforce_relro(obj) == -1)
@@ -3747,8 +3800,10 @@ rtld_dlopen(const char *name, int fd, int mode)
 	    lo_flags |= RTLD_LO_NODELETE;
     if (mode & RTLD_NOLOAD)
 	    lo_flags |= RTLD_LO_NOLOAD;
+    if (mode & RTLD_DEEPBIND)
+	    lo_flags |= RTLD_LO_DEEPBIND;
     if (ld_tracing != NULL)
-	    lo_flags |= RTLD_LO_TRACE;
+	    lo_flags |= RTLD_LO_TRACE | RTLD_LO_IGNSTLS;
 
     return (dlopen_object(name, fd, obj_main, lo_flags,
       mode & (RTLD_MODEMASK | RTLD_GLOBAL), NULL));
@@ -3798,16 +3853,18 @@ dlopen_object(const char *name, int fd, Obj_Entry *refobj, int lo_flags,
 	if (globallist_next(old_obj_tail) != NULL) {
 	    /* We loaded something new. */
 	    assert(globallist_next(old_obj_tail) == obj);
+	    if ((lo_flags & RTLD_LO_DEEPBIND) != 0)
+		obj->symbolic = true;
 	    result = 0;
-	    if ((lo_flags & RTLD_LO_EARLY) == 0 && obj->static_tls &&
-	      !allocate_tls_offset(obj)) {
+	    if ((lo_flags & (RTLD_LO_EARLY | RTLD_LO_IGNSTLS)) == 0 &&
+	      obj->static_tls && !allocate_tls_offset(obj)) {
 		_rtld_error("%s: No space available "
 		  "for static Thread Local Storage", obj->path);
 		result = -1;
 	    }
 	    if (result != -1)
 		result = load_needed_objects(obj, lo_flags & (RTLD_LO_DLOPEN |
-		    RTLD_LO_EARLY));
+		    RTLD_LO_EARLY | RTLD_LO_IGNSTLS));
 	    init_dag(obj);
 	    ref_dag(obj);
 	    if (result != -1)
@@ -4443,53 +4500,51 @@ rtld_dirname_abs(const char *path, char *base)
 static void
 linkmap_add(Obj_Entry *obj)
 {
-    dbg("Adding %s to linkmap", printable_path(obj->path));
-    struct link_map *l = &obj->linkmap;
-    struct link_map *prev;
+	struct link_map *l, *prev;
 
-    obj->linkmap.l_name = obj->path;
-    obj->linkmap.l_addr = obj->mapbase;
-    obj->linkmap.l_ld = obj->dynamic;
-#ifdef __mips__
-    /* GDB needs load offset on MIPS to use the symbols */
-    obj->linkmap.l_offs = obj->relocbase;
-#endif
+	dbg("Adding %s to linkmap", printable_path(obj->path));
+	l = &obj->linkmap;
+	l->l_name = obj->path;
+	l->l_base = obj->mapbase;
+	l->l_ld = obj->dynamic;
+	l->l_addr = obj->relocbase;
 
-    if (r_debug.r_map == NULL) {
-	r_debug.r_map = l;
-	return;
-    }
+	if (r_debug.r_map == NULL) {
+		r_debug.r_map = l;
+		return;
+	}
 
-    /*
-     * Scan to the end of the list, but not past the entry for the
-     * dynamic linker, which we want to keep at the very end.
-     */
-    for (prev = r_debug.r_map;
-      prev->l_next != NULL && prev->l_next != &obj_rtld.linkmap;
-      prev = prev->l_next)
-	;
+	/*
+	 * Scan to the end of the list, but not past the entry for the
+	 * dynamic linker, which we want to keep at the very end.
+	 */
+	for (prev = r_debug.r_map;
+	    prev->l_next != NULL && prev->l_next != &obj_rtld.linkmap;
+	     prev = prev->l_next)
+		;
 
-    /* Link in the new entry. */
-    l->l_prev = prev;
-    l->l_next = prev->l_next;
-    if (l->l_next != NULL)
-	l->l_next->l_prev = l;
-    prev->l_next = l;
+	/* Link in the new entry. */
+	l->l_prev = prev;
+	l->l_next = prev->l_next;
+	if (l->l_next != NULL)
+		l->l_next->l_prev = l;
+	prev->l_next = l;
 }
 
 static void
 linkmap_delete(Obj_Entry *obj)
 {
-    struct link_map *l = &obj->linkmap;
+	struct link_map *l;
 
-    if (l->l_prev == NULL) {
-	if ((r_debug.r_map = l->l_next) != NULL)
-	    l->l_next->l_prev = NULL;
-	return;
-    }
+	l = &obj->linkmap;
+	if (l->l_prev == NULL) {
+		if ((r_debug.r_map = l->l_next) != NULL)
+			l->l_next->l_prev = NULL;
+		return;
+	}
 
-    if ((l->l_prev->l_next = l->l_next) != NULL)
-	l->l_next->l_prev = l->l_prev;
+	if ((l->l_prev->l_next = l->l_next) != NULL)
+		l->l_next->l_prev = l->l_prev;
 }
 
 /*
@@ -5288,7 +5343,7 @@ allocate_tls(Obj_Entry *objs, void *oldtcb, size_t tcbsize, size_t tcbalign)
     char *addr;
     Elf_Addr i;
     size_t extra_size, maxalign, post_size, pre_size, tls_block_size;
-    size_t tls_init_align;
+    size_t tls_init_align, tls_init_offset;
 
     if (oldtcb != NULL && tcbsize == TLS_TCB_SIZE)
 	return (oldtcb);
@@ -5305,7 +5360,7 @@ allocate_tls(Obj_Entry *objs, void *oldtcb, size_t tcbsize, size_t tcbalign)
     tls_block_size += pre_size + tls_static_space - TLS_TCB_SIZE - post_size;
 
     /* Allocate whole TLS block */
-    tls_block = malloc_aligned(tls_block_size, maxalign);
+    tls_block = malloc_aligned(tls_block_size, maxalign, 0);
     tcb = (uintptr_t **)(tls_block + pre_size + extra_size);
 
     if (oldtcb != NULL) {
@@ -5329,15 +5384,21 @@ allocate_tls(Obj_Entry *objs, void *oldtcb, size_t tcbsize, size_t tcbalign)
 
 	for (obj = globallist_curr(objs); obj != NULL;
 	  obj = globallist_next(obj)) {
-	    if (obj->tlsoffset > 0) {
-		addr = (char *)tcb + obj->tlsoffset;
-		if (obj->tlsinitsize > 0)
-		    memcpy(addr, obj->tlsinit, obj->tlsinitsize);
-		if (obj->tlssize > obj->tlsinitsize)
-		    memset((void*)(addr + obj->tlsinitsize), 0,
-			   obj->tlssize - obj->tlsinitsize);
-		dtv[obj->tlsindex + 1] = (uintptr_t)addr;
+	    if (obj->tlsoffset == 0)
+		continue;
+	    tls_init_offset = obj->tlspoffset & (obj->tlsalign - 1);
+	    addr = (char *)tcb + obj->tlsoffset;
+	    if (tls_init_offset > 0)
+		memset((void *)addr, 0, tls_init_offset);
+	    if (obj->tlsinitsize > 0) {
+		memcpy((void *)(addr + tls_init_offset), obj->tlsinit,
+		    obj->tlsinitsize);
 	    }
+	    if (obj->tlssize > obj->tlsinitsize) {
+		memset((void *)(addr + tls_init_offset + obj->tlsinitsize),
+		    0, obj->tlssize - obj->tlsinitsize - tls_init_offset);
+	    }
+	    dtv[obj->tlsindex + 1] = (uintptr_t)addr;
 	}
     }
 
@@ -5374,7 +5435,7 @@ free_tls(void *tcb, size_t tcbsize, size_t tcbalign __unused)
 
 #endif
 
-#if defined(__i386__) || defined(__amd64__) || defined(__sparc64__)
+#if defined(__i386__) || defined(__amd64__)
 
 /*
  * Allocate Static TLS using the Variant II method.
@@ -5392,13 +5453,13 @@ allocate_tls(Obj_Entry *objs, void *oldtls, size_t tcbsize, size_t tcbalign)
     ralign = tcbalign;
     if (tls_static_max_align > ralign)
 	    ralign = tls_static_max_align;
-    size = round(tls_static_space, ralign) + round(tcbsize, ralign);
+    size = roundup(tls_static_space, ralign) + roundup(tcbsize, ralign);
 
     assert(tcbsize >= 2*sizeof(Elf_Addr));
-    tls = malloc_aligned(size, ralign);
+    tls = malloc_aligned(size, ralign, 0 /* XXX */);
     dtv = xcalloc(tls_max_index + 2, sizeof(Elf_Addr));
 
-    segbase = (Elf_Addr)(tls + round(tls_static_space, ralign));
+    segbase = (Elf_Addr)(tls + roundup(tls_static_space, ralign));
     ((Elf_Addr*)segbase)[0] = segbase;
     ((Elf_Addr*)segbase)[1] = (Elf_Addr) dtv;
 
@@ -5464,7 +5525,7 @@ free_tls(void *tls, size_t tcbsize  __unused, size_t tcbalign)
     ralign = tcbalign;
     if (tls_static_max_align > ralign)
 	    ralign = tls_static_max_align;
-    size = round(tls_static_space, ralign);
+    size = roundup(tls_static_space, ralign);
 
     dtv = ((Elf_Addr**)tls)[1];
     dtvsize = dtv[1];
@@ -5488,24 +5549,24 @@ free_tls(void *tls, size_t tcbsize  __unused, size_t tcbalign)
 void *
 allocate_module_tls(int index)
 {
-    Obj_Entry* obj;
-    char* p;
+	Obj_Entry *obj;
+	char *p;
 
-    TAILQ_FOREACH(obj, &obj_list, next) {
-	if (obj->marker)
-	    continue;
-	if (obj->tlsindex == index)
-	    break;
-    }
-    if (!obj) {
-	rtld_fatal("Can't find module with TLS index %d", index);
-    }
+	TAILQ_FOREACH(obj, &obj_list, next) {
+		if (obj->marker)
+			continue;
+		if (obj->tlsindex == index)
+			break;
+	}
+	if (obj == NULL) {
+		_rtld_error("Can't find module with TLS index %d", index);
+		rtld_die();
+	}
 
-    p = malloc_aligned(obj->tlssize, obj->tlsalign);
-    memcpy(p, obj->tlsinit, obj->tlsinitsize);
-    memset(p + obj->tlsinitsize, 0, obj->tlssize - obj->tlsinitsize);
-
-    return p;
+	p = malloc_aligned(obj->tlssize, obj->tlsalign, obj->tlspoffset);
+	memcpy(p, obj->tlsinit, obj->tlsinitsize);
+	memset(p + obj->tlsinitsize, 0, obj->tlssize - obj->tlsinitsize);
+	return (p);
 }
 
 bool
@@ -5522,10 +5583,11 @@ allocate_tls_offset(Obj_Entry *obj)
     }
 
     if (tls_last_offset == 0)
-	off = calculate_first_tls_offset(obj->tlssize, obj->tlsalign);
+	off = calculate_first_tls_offset(obj->tlssize, obj->tlsalign,
+	  obj->tlspoffset);
     else
 	off = calculate_tls_offset(tls_last_offset, tls_last_size,
-				   obj->tlssize, obj->tlsalign);
+	  obj->tlssize, obj->tlsalign, obj->tlspoffset);
 
     /*
      * If we have already fixed the size of the static TLS block, we
@@ -5954,7 +6016,7 @@ static int
 open_binary_fd(const char *argv0, bool search_in_path,
     const char **binpath_res)
 {
-	char *abspath, *absres, *binpath, *pathenv, *pe, *res1;
+	char *binpath, *pathenv, *pe, *res1;
 	const char *res;
 	int fd;
 
@@ -5999,31 +6061,16 @@ open_binary_fd(const char *argv0, bool search_in_path,
 		rtld_die();
 	}
 	if (res != NULL && res[0] != '/') {
-		abspath = getcwd(NULL, 0);
-		if (abspath != NULL) {
-			res1 = xmalloc(PATH_MAX);
-			if (realpath(res, res1) != NULL) {
-				if (res != argv0)
-					free(__DECONST(char *, res));
-				res = res1;
-			} else {
-				free(res1);
-			}
-			absres = xmalloc(strlen(abspath) +
-			    strlen(res) + 2);
-			strcpy(absres, abspath);
-			strcat(absres, "/");
-			strcat(absres, res);
-			free(abspath);
+		res1 = xmalloc(PATH_MAX);
+		if (realpath(res, res1) != NULL) {
 			if (res != argv0)
 				free(__DECONST(char *, res));
-			*binpath_res = absres;
+			res = res1;
 		} else {
-			*binpath_res = res;
+			free(res1);
 		}
-	} else {
-		*binpath_res = res;
 	}
+	*binpath_res = res;
 	return (fd);
 }
 
@@ -6031,15 +6078,20 @@ open_binary_fd(const char *argv0, bool search_in_path,
  * Parse a set of command-line arguments.
  */
 static int
-parse_args(char* argv[], int argc, bool *use_pathp, int *fdp)
+parse_args(char* argv[], int argc, bool *use_pathp, int *fdp,
+    const char **argv0)
 {
 	const char *arg;
-	int fd, i, j, arglen;
+	char machine[64];
+	size_t sz;
+	int arglen, fd, i, j, mib[2];
 	char opt;
+	bool seen_b, seen_f;
 
 	dbg("Parsing command-line arguments");
 	*use_pathp = false;
 	*fdp = -1;
+	seen_b = seen_f = false;
 
 	for (i = 1; i < argc; i++ ) {
 		arg = argv[i];
@@ -6066,29 +6118,67 @@ parse_args(char* argv[], int argc, bool *use_pathp, int *fdp)
 			if (opt == 'h') {
 				print_usage(argv[0]);
 				_exit(0);
+			} else if (opt == 'b') {
+				if (seen_f) {
+					_rtld_error("Both -b and -f specified");
+					rtld_die();
+				}
+				i++;
+				*argv0 = argv[i];
+				seen_b = true;
+				break;
 			} else if (opt == 'f') {
-			/*
-			 * -f XX can be used to specify a descriptor for the
-			 * binary named at the command line (i.e., the later
-			 * argument will specify the process name but the
-			 * descriptor is what will actually be executed)
-			 */
-			if (j != arglen - 1) {
-				/* -f must be the last option in, e.g., -abcf */
-				rtld_fatal("Invalid options: %s", arg);
-			}
-			i++;
-			fd = parse_integer(argv[i]);
-			if (fd == -1) {
-				rtld_fatal("Invalid file descriptor: '%s'",
-				    argv[i]);
-			}
-			*fdp = fd;
-			break;
+				if (seen_b) {
+					_rtld_error("Both -b and -f specified");
+					rtld_die();
+				}
+
+				/*
+				 * -f XX can be used to specify a
+				 * descriptor for the binary named at
+				 * the command line (i.e., the later
+				 * argument will specify the process
+				 * name but the descriptor is what
+				 * will actually be executed).
+				 *
+				 * -f must be the last option in, e.g., -abcf.
+				 */
+				if (j != arglen - 1) {
+					rtld_fatal("Invalid options: %s", arg);
+				}
+				i++;
+				fd = parse_integer(argv[i]);
+				if (fd == -1) {
+					rtld_fatal(
+					    "Invalid file descriptor: '%s'",
+					    argv[i]);
+					rtld_die();
+				}
+				*fdp = fd;
+				seen_f = true;
+				break;
 			} else if (opt == 'p') {
 				*use_pathp = true;
 			} else if (opt == 't') {
 				ld_tracing = "yes";
+			} else if (opt == 'v') {
+				machine[0] = '\0';
+				mib[0] = CTL_HW;
+				mib[1] = HW_MACHINE;
+				sz = sizeof(machine);
+				sysctl(mib, nitems(mib), machine, &sz, NULL, 0);
+				rtld_printf(
+				    "FreeBSD ld-elf.so.1 %s\n"
+				    "FreeBSD_version %d\n"
+				    "Default lib path %s\n"
+				    "Env prefix %s\n"
+				    "Hint file %s\n"
+				    "libmap file %s\n",
+				    machine,
+				    __FreeBSD_version, ld_standard_library_path,
+				    ld_env_prefix, ld_elf_hints_default,
+				    ld_path_libmap_conf);
+				_exit(0);
 			} else {
 				_rtld_error("Invalid argument: '%s'", arg);
 				print_usage(argv[0]);
@@ -6097,6 +6187,8 @@ parse_args(char* argv[], int argc, bool *use_pathp, int *fdp)
 		}
 	}
 
+	if (!seen_b)
+		*argv0 = argv[i];
 	return (i);
 }
 
@@ -6131,16 +6223,19 @@ static void
 print_usage(const char *argv0)
 {
 
-	rtld_printf("Usage: %s [-h] [-f <FD>] [--] <binary> [<args>]\n"
-		"\n"
-		"Options:\n"
-		"  -h        Display this help message\n"
-		"  -p        Search in PATH for named binary\n"
-		"  -t        Trace loaded libraries instead of executing <binary>\n"
-		"  -f <FD>   Execute <FD> instead of searching for <binary>\n"
-		"  --        End of RTLD options\n"
-		"  <binary>  Name of process to execute\n"
-		"  <args>    Arguments to the executed process\n", argv0);
+	rtld_printf(
+	    "Usage: %s [-h] [-b <exe>] [-f <FD>] [-p] [--] <binary> [<args>]\n"
+	    "\n"
+	    "Options:\n"
+	    "  -h        Display this help message\n"
+	    "  -b <exe>  Execute <exe> instead of <binary>, arg0 is <binary>\n"
+	    "  -f <FD>   Execute <FD> instead of searching for <binary>\n"
+	    "  -p        Search in PATH for named binary\n"
+	    "  -t        Trace loaded libraries instead of executing <binary>\n"
+	    "  -v        Display identification information\n"
+	    "  --        End of RTLD options\n"
+	    "  <binary>  Name of process to execute\n"
+	    "  <args>    Arguments to the executed process\n", argv0);
 }
 
 /*
@@ -6176,28 +6271,6 @@ rtld_strerror(int errnum)
 	return (sys_errlist[errnum]);
 }
 
-/*
- * No ifunc relocations.
- */
-void *
-memset(void *dest, int c, size_t len)
-{
-	size_t i;
-
-	for (i = 0; i < len; i++)
-		((char *)dest)[i] = c;
-	return (dest);
-}
-
-void
-bzero(void *dest, size_t len)
-{
-	size_t i;
-
-	for (i = 0; i < len; i++)
-		((char *)dest)[i] = 0;
-}
-
 /* malloc */
 void *
 malloc(size_t nbytes)
@@ -6226,3 +6299,9 @@ realloc(void *cp, size_t nbytes)
 
 	return (__crt_realloc(cp, nbytes));
 }
+
+extern int _rtld_version__FreeBSD_version __exported;
+int _rtld_version__FreeBSD_version = __FreeBSD_version;
+
+extern char _rtld_version_laddr_offset __exported;
+char _rtld_version_laddr_offset;

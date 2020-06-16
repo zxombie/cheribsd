@@ -7,6 +7,9 @@ __BSD_PROG_MK=yes
 .include <bsd.cheri.mk>
 .include <bsd.compiler.mk>
 .include <bsd.linker.mk>
+.if defined(_CRUNCHGEN)
+.include <bsd.compat.mk>
+.endif
 
 .SUFFIXES: .out .o .bc .c .cc .cpp .cxx .C .m .y .l .ll .ln .s .S .asm
 
@@ -42,10 +45,13 @@ MK_DEBUG_FILES=	no
 .if ${MK_BIND_NOW} != "no"
 LDFLAGS+= -Wl,-znow
 .endif
-.if ${MK_PIE} != "no" && (!defined(NO_SHARED) || ${NO_SHARED:tl} == "no")
+.if ${MK_PIE} != "no"
+# Static PIE is not yet supported/tested.
+.if !defined(NO_SHARED) || ${NO_SHARED:tl} == "no"
 CFLAGS+= -fPIE
 CXXFLAGS+= -fPIE
 LDFLAGS+= -pie
+.endif
 .endif
 .if ${MK_RETPOLINE} != "no"
 .if ${COMPILER_FEATURES:Mretpoline} && ${LINKER_FEATURES:Mretpoline}
@@ -57,6 +63,25 @@ LDFLAGS+= -Wl,-zretpolineplt
 .endif
 .else
 .warning Retpoline requested but not supported by compiler or linker
+.endif
+.endif
+
+# Initialize stack variables on function entry
+.if ${MK_INIT_ALL_ZERO} == "yes"
+.if ${COMPILER_FEATURES:Minit-all}
+CFLAGS+= -ftrivial-auto-var-init=zero \
+    -enable-trivial-auto-var-init-zero-knowing-it-will-be-removed-from-clang
+CXXFLAGS+= -ftrivial-auto-var-init=zero \
+    -enable-trivial-auto-var-init-zero-knowing-it-will-be-removed-from-clang
+.else
+.warning InitAll (zeros) requested but not support by compiler
+.endif
+.elif ${MK_INIT_ALL_PATTERN} == "yes"
+.if ${COMPILER_FEATURES:Minit-all}
+CFLAGS+= -ftrivial-auto-var-init=pattern
+CXXFLAGS+= -ftrivial-auto-var-init=pattern
+.else
+.warning InitAll (pattern) requested but not support by compiler
 .endif
 .endif
 
@@ -225,7 +250,7 @@ ${PROGNAME}.debug: ${PROG_FULL}
 
 .if ${PROG_INSTALL} != ${PROG}
 ${PROG_INSTALL}: ${PROG}
-	${STRIPBIN:Ustrip} -o ${.TARGET} ${STRIP_FLAGS} ${PROG}
+	${STRIPBIN} -o ${.TARGET} ${STRIP_FLAGS} ${PROG}
 .endif
 
 .if defined(LLVM_LINK)
@@ -314,9 +339,9 @@ _proginstall:
 	    ${_INSTALLFLAGS} ${PROG} ${DESTDIR}${BINDIR}/${PROGNAME}
 .if ${MK_DEBUG_FILES} != "no"
 .if defined(DEBUGMKDIR)
-	${INSTALL} ${TAG_ARGS:D${TAG_ARGS},debug} -d ${DESTDIR}${DEBUGFILEDIR}/
+	${INSTALL} ${TAG_ARGS:D${TAG_ARGS},dbg} -d ${DESTDIR}${DEBUGFILEDIR}/
 .endif
-	${INSTALL} ${TAG_ARGS:D${TAG_ARGS},debug} -o ${BINOWN} -g ${BINGRP} -m ${DEBUGMODE} \
+	${INSTALL} ${TAG_ARGS:D${TAG_ARGS},dbg} -o ${BINOWN} -g ${BINGRP} -m ${DEBUGMODE} \
 	    ${PROGNAME}.debug ${DESTDIR}${DEBUGFILEDIR}/${PROGNAME}.debug
 .endif
 .endif

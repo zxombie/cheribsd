@@ -265,7 +265,8 @@ struct accept_filter_arg {
 #define	AF_IEEE80211	37		/* IEEE 802.11 protocol */
 #define	AF_INET_SDP	40		/* OFED Socket Direct Protocol ipv4 */
 #define	AF_INET6_SDP	42		/* OFED Socket Direct Protocol ipv6 */
-#define	AF_MAX		42
+#define	AF_HYPERV	43		/* HyperV sockets */
+#define	AF_MAX		43
 /*
  * When allocating a new AF_ constant, please only allocate
  * even numbered constants for FreeBSD until 134 as odd numbered AF_
@@ -273,7 +274,6 @@ struct accept_filter_arg {
  */
 #define AF_VENDOR00 39
 #define AF_VENDOR01 41
-#define AF_VENDOR02 43
 #define AF_VENDOR03 45
 #define AF_VENDOR04 47
 #define AF_VENDOR05 49
@@ -416,6 +416,7 @@ struct sockproto {
 #define	NET_RT_IFMALIST	4		/* return multicast address list */
 #define	NET_RT_IFLISTL	5		/* Survey interface list, using 'l'en
 					 * versions of msghdr structs. */
+#define NET_RT_NHOP	6		/* dump routing nexthops */
 #endif /* __BSD_VISIBLE */
 
 /*
@@ -439,13 +440,13 @@ struct msghdr {
 #ifdef _KERNEL
 #ifdef COMPAT_FREEBSD64
 struct msghdr64 {
-	void		*msg_name;		/* optional address */
-	socklen_t	 msg_namelen;		/* size of address */
-	struct iovec64	*msg_iov;		/* scatter/gather array */
-	int		 msg_iovlen;		/* # elements in msg_iov */
-	void		*msg_control;		/* ancillary data, see below */
-	socklen_t	 msg_controllen;	/* ancillary data buffer len */
-	int		 msg_flags;		/* flags on received message */
+	uint64_t	msg_name;	/* (void *) optional address */
+	socklen_t	msg_namelen;	/* size of address */
+	uint64_t	msg_iov;	/* (struct iovec64 *) scatter/gather array */
+	int		msg_iovlen;	/* # elements in msg_iov */
+	uint64_t	msg_control;	/* (void *) ancillary data, see below */
+	socklen_t	msg_controllen;	/* ancillary data buffer len */
+	int		msg_flags;	/* flags on received message */
 };
 #endif
 #endif	/* _KERNEL */
@@ -539,14 +540,18 @@ struct sockcred {
 
 #endif /* __BSD_VISIBLE */
 
-#ifndef __CHERI_PURE_CAPABILITY__
-#define	_CMSG_ALIGN(n)	_ALIGN(n)
-#else
 /*
- * Don't align for capabilities in CheriABI.  Sending them makes little
+ * We should not need to align for capabilities in CheriABI. Sending them makes little
  * sense and would be a major potential security hole.
+ * However within the kernel control messages may contain pointers (see SCM_RIGHTS),
+ * therefore we need to align to pointer size within the kernel.
+ * Aligning to capability size should remove the need for realignment in the hybrid kernel/
+ * purecap userspace combination.
  */
-#define	_CMSG_ALIGN(n)	__builtin_align_up((n), sizeof(u_long))
+#if __has_feature(capabilities) && defined(_KERNEL)
+#define	_CMSG_ALIGN(n)	__builtin_align_up((n), sizeof(void * __capability))
+#else
+#define	_CMSG_ALIGN(n)	_ALIGN(n)
 #endif
 
 /* given pointer to struct cmsghdr, return pointer to data */

@@ -39,8 +39,6 @@ __FBSDID("$FreeBSD$");
 #include "opt_posix.h"
 #include "opt_capsicum.h"
 
-#define	EXPLICIT_USER_ACCESS
-
 #include <sys/param.h>
 #include <sys/bus.h>
 #include <sys/capsicum.h>
@@ -657,7 +655,7 @@ cheriabi_copyout_strings(struct image_params *imgp, uintptr_t *stack_base)
 	 */
 	if (execpath_len != 0) {
 		destp -= execpath_len;
-		imgp->execpathp = cheri_csetbounds(destp, execpath_len);
+		imgp->execpathp = cheri_setbounds(destp, execpath_len);
 		copyout(imgp->execpath, destp, execpath_len);
 	}
 
@@ -666,7 +664,7 @@ cheriabi_copyout_strings(struct image_params *imgp, uintptr_t *stack_base)
 	 */
 	arc4rand(canary, sizeof(canary), 0);
 	destp -= sizeof(canary);
-	imgp->canary = cheri_csetbounds(destp, sizeof(canary));
+	imgp->canary = cheri_setbounds(destp, sizeof(canary));
 	copyout(canary, destp, sizeof(canary));
 	imgp->canarylen = sizeof(canary);
 
@@ -675,7 +673,7 @@ cheriabi_copyout_strings(struct image_params *imgp, uintptr_t *stack_base)
 	 */
 	destp -= szps;
 	destp = __builtin_align_down(destp, sizeof(void * __capability));
-	imgp->pagesizes = cheri_csetbounds(destp, szps);
+	imgp->pagesizes = cheri_setbounds(destp, szps);
 	copyout(pagesizes, destp, szps);
 	imgp->pagesizeslen = szps;
 
@@ -711,7 +709,7 @@ cheriabi_copyout_strings(struct image_params *imgp, uintptr_t *stack_base)
 	/*
 	 * Fill in "ps_strings" struct for ps, w, etc.
 	 */
-	imgp->argv = cheri_csetbounds(vectp, (argc + 1) * sizeof(*vectp));
+	imgp->argv = cheri_setbounds(vectp, (argc + 1) * sizeof(*vectp));
 	sucap(&arginfo->ps_argvstr, (intcap_t)imgp->argv);
 	suword32(&arginfo->ps_nargvstr, argc);
 
@@ -720,7 +718,7 @@ cheriabi_copyout_strings(struct image_params *imgp, uintptr_t *stack_base)
 	 */
 	for (; argc > 0; --argc) {
 		sucap(vectp++,
-		    (intcap_t)cheri_csetbounds(destp, strlen(stringp) + 1));
+		    (intcap_t)cheri_setbounds(destp, strlen(stringp) + 1));
 		while (*stringp++ != 0)
 			destp++;
 		destp++;
@@ -730,7 +728,7 @@ cheriabi_copyout_strings(struct image_params *imgp, uintptr_t *stack_base)
 	/* XXX: suword clears the tag */
 	suword(vectp++, 0);
 
-	imgp->envv = cheri_csetbounds(vectp, (envc + 1) * sizeof(*vectp));
+	imgp->envv = cheri_setbounds(vectp, (envc + 1) * sizeof(*vectp));
 	sucap(&arginfo->ps_envstr, (intcap_t)imgp->envv);
 	suword32(&arginfo->ps_nenvstr, envc);
 
@@ -739,7 +737,7 @@ cheriabi_copyout_strings(struct image_params *imgp, uintptr_t *stack_base)
 	 */
 	for (; envc > 0; --envc) {
 		sucap(vectp++,
-		    (intcap_t)cheri_csetbounds(destp, strlen(stringp) + 1));
+		    (intcap_t)cheri_setbounds(destp, strlen(stringp) + 1));
 		while (*stringp++ != 0)
 			destp++;
 		destp++;
@@ -1415,7 +1413,7 @@ cheriabi___sysctl(struct thread *td, struct cheriabi___sysctl_args *uap)
 {
 
 	return (kern_sysctl(td, uap->name, uap->namelen, uap->old,
-	    uap->oldlenp, uap->new, uap->newlen, SCTL_CHERIABI));
+	    uap->oldlenp, uap->new, uap->newlen, 0));
 }
 
 int
@@ -1472,13 +1470,16 @@ static int
 cheriabi_thr_new_initthr(struct thread *td, void *thunk)
 {
 	struct thr_param_c *param = thunk;
+	stack_t stack;
 
 	if ((param->child_tid != NULL &&
 	    suword(param->child_tid, td->td_tid)) ||
 	    (param->parent_tid != NULL &&
 	    suword(param->parent_tid, td->td_tid)))
 		return (EFAULT);
-	cheriabi_set_threadregs(td, param);
+	stack.ss_sp = param->stack_base;
+	stack.ss_size = param->stack_size;
+	cpu_set_upcall(td, param->start_func, param->arg, &stack);
 	return (cpu_set_user_tls(td, param->tls_base));
 }
 
@@ -1766,9 +1767,9 @@ int
 cheriabi_ptrace(struct thread *td, struct cheriabi_ptrace_args *uap)
 {
 	union {
-		struct ptrace_io_desc_c piod;
+		struct ptrace_io_desc piod;
 		struct ptrace_lwpinfo pl;
-		struct ptrace_vm_entry_c pve;
+		struct ptrace_vm_entry pve;
 #if __has_feature(capabilities)
 		struct capreg capreg;
 #endif
@@ -1780,10 +1781,6 @@ cheriabi_ptrace(struct thread *td, struct cheriabi_ptrace_args *uap)
 		int ptevents;
 	} r = { 0 };
 
-	union {
-		struct ptrace_lwpinfo_c pl;
-	} c = { 0 };
-
 	int error = 0, data;
 	void * __capability addr = &r;
 
@@ -1791,7 +1788,6 @@ cheriabi_ptrace(struct thread *td, struct cheriabi_ptrace_args *uap)
 	AUDIT_ARG_CMD(uap->req);
 	AUDIT_ARG_VALUE(uap->data);
 
-	(void)c;
 	data = uap->data;
 
 	switch (uap->req) {
@@ -1817,13 +1813,7 @@ cheriabi_ptrace(struct thread *td, struct cheriabi_ptrace_args *uap)
 	case PT_GET_SC_RET:
 	case PT_LWP_EVENTS:
 	case PT_SUSPEND:
-		break;
-
 	case PT_LWPINFO:
-		if (uap->data > sizeof(c.pl))
-			error = EINVAL;
-		else
-			data = sizeof(r.pl);
 		break;
 
 	/* Pass along an untagged virtual address for the desired PC. */
@@ -1899,18 +1889,21 @@ cheriabi_ptrace(struct thread *td, struct cheriabi_ptrace_args *uap)
 		return (error);
 
 	switch (uap->req) {
-#if 0
 	case PT_VM_ENTRY:
-		error = COPYOUT(&r.pve, uap->addr, sizeof r.pve);
+		/*
+		 * Only copy out updated fields prior to pve_path to
+		 * avoid the use of copyoutcap.
+		 */
+		error = copyout(&r.pve, uap->addr,
+		    offsetof(struct ptrace_vm_entry, pve_path));
 		break;
-#endif
 	case PT_IO:
 		/*
 		 * Only copy out the updated piod_len to avoid the use
 		 * of copyoutcap.
 		 */
 		error = copyout(&r.piod.piod_len, uap->addr +
-		    offsetof(struct ptrace_io_desc_c, piod_len),
+		    offsetof(struct ptrace_io_desc, piod_len),
 		    sizeof(r.piod.piod_len));
 		break;
 #if 0
@@ -1934,19 +1927,7 @@ cheriabi_ptrace(struct thread *td, struct cheriabi_ptrace_args *uap)
 		error = copyout(&r.ptevents, uap->addr, uap->data);
 		break;
 	case PT_LWPINFO:
-		memset(&c.pl, 0, sizeof(c.pl));
-		c.pl.pl_lwpid = r.pl.pl_lwpid;
-		c.pl.pl_event = r.pl.pl_event;
-		c.pl.pl_flags = r.pl.pl_flags;
-		c.pl.pl_sigmask = r.pl.pl_sigmask;
-		c.pl.pl_siglist = r.pl.pl_siglist;
-		c.pl.pl_child_pid = r.pl.pl_child_pid;
-		c.pl.pl_syscall_code = r.pl.pl_syscall_code;
-		c.pl.pl_syscall_narg = r.pl.pl_syscall_narg;
-		memcpy(c.pl.pl_tdname, r.pl.pl_tdname, sizeof(c.pl.pl_tdname));
-		memcpy(&c.pl.pl_siginfo, &r.pl.pl_siginfo, sizeof(c.pl.pl_siginfo));
-
-		error = copyout(&c.pl, uap->addr, uap->data);
+		error = copyout(&r.pl, uap->addr, uap->data);
 		break;
 	case PT_GET_SC_ARGS:
 		error = copyout(r.args, uap->addr, MIN(uap->data,

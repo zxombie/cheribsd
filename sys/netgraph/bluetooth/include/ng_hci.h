@@ -1672,13 +1672,22 @@ typedef struct {
 	u_int16_t connection_handle;
 }__attribute__ ((packed)) ng_hci_le_long_term_key_request_negative_reply_rp;
 
+#define NG_HCI_OCF_LE_READ_BUFFER_SIZE_V2		0x0060
+/*No command parameter */
+typedef struct {
+	u_int8_t	status;
+	u_int16_t 	hc_le_data_packet_length;
+	u_int8_t	hc_total_num_le_data_packets; 
+	u_int16_t 	hc_iso_data_packet_length;
+	u_int8_t	hc_total_num_iso_data_packets; 
+} __attribute__ ((packed)) ng_hci_le_read_buffer_size_rp_v2;
 
-#define NG_HCI_OCF_LE_READ_SUPPORTED_STATUS		0x001c
+#define NG_HCI_OCF_LE_READ_SUPPORTED_STATES		0x001c
 /*No command parameter*/
 typedef struct {
 	u_int8_t status;
-	u_int64_t le_status;
-}__attribute__ ((packed)) ng_hci_le_read_supported_status_rp;
+	u_int64_t le_states;
+}__attribute__ ((packed)) ng_hci_le_read_supported_states_rp;
 
 #define NG_HCI_OCF_LE_RECEIVER_TEST			0x001d
 typedef struct{
@@ -1955,7 +1964,7 @@ typedef struct {
 	u_int16_t 	interval;
 	u_int8_t	latency;
 	u_int16_t	supervision_timeout;
-	u_int8_t	master_clock_accracy;
+	u_int8_t	master_clock_accuracy;
 	
 } __attribute__ ((packed)) ng_hci_le_connection_complete_ep;
 
@@ -1971,7 +1980,8 @@ typedef struct {
 	u_int8_t addr_type;
 	bdaddr_t bdaddr;
 	u_int8_t length_data;
-	u_int8_t data[NG_HCI_SCAN_RESPONSE_DATA_MAX];
+	/* The last octet is for RSSI */
+	u_int8_t data[NG_HCI_SCAN_RESPONSE_DATA_MAX+1];
 }__attribute__((packed)) ng_hci_le_advreport;
 
 #define NG_HCI_LEEV_CON_UPDATE_COMPL 0x03
@@ -1982,11 +1992,65 @@ typedef struct {
 	u_int16_t conn_latency;
 	u_int16_t supervision_timeout;
 }__attribute__((packed)) ng_hci_connection_update_complete_ep;
-#define NG_HCI_LEEV_READ_REMOTE_FEATURES_COMPL 0x04
-//TBD
-#define NG_HCI_LEEV_LONG_TERM_KEY_REQUEST 0x05
-//TBD
 
+#define NG_HCI_LEEV_READ_REMOTE_FEATURES_COMPL 0x04
+typedef struct {
+	u_int8_t 	status;
+	u_int16_t 	connection_handle;
+	u_int8_t	features[NG_HCI_FEATURES_SIZE];
+}__attribute__((packed)) ng_hci_le_read_remote_features_ep;
+
+#define NG_HCI_LEEV_LONG_TERM_KEY_REQUEST 0x05
+typedef struct {
+	u_int16_t 	connection_handle;
+	u_int64_t 	random_number;
+	u_int16_t 	encrypted_diversifier;
+}__attribute__((packed)) ng_hci_le_long_term_key_request_ep;
+
+#define NG_HCI_LEEV_REMOTE_CONN_PARAM_REQUEST 0x06
+typedef struct {
+	u_int16_t 	connection_handle;
+	u_int16_t 	interval_min;
+	u_int16_t 	interval_max;
+	u_int16_t 	latency;
+	u_int16_t 	timeout;
+}__attribute__((packed)) ng_hci_le_remote_conn_param_ep;
+
+#define NG_HCI_LEEV_DATA_LENGTH_CHANGE 0x07
+typedef struct {
+	u_int16_t 	connection_handle;
+	u_int16_t 	min_tx_octets;
+	u_int16_t 	max_tx_time;
+	u_int16_t 	max_rx_octets;
+	u_int16_t 	max_rx_time;
+}__attribute__((packed)) ng_hci_le_data_length_change_ep;
+
+#define NG_HCI_LEEV_READ_LOCAL_P256_PK_COMPL 0x08
+typedef struct {
+	u_int8_t 	status;
+	u_int8_t 	local_p256_pk[64];
+}__attribute__((packed)) ng_hci_le_read_local_p256_pk_compl_ep;
+
+#define NG_HCI_LEEV_GEN_DHKEY_COMPL 0x09
+typedef struct {
+	u_int8_t 	status;
+	u_int8_t 	dh_key[32];
+}__attribute__((packed)) ng_hci_le_gen_dhkey_compl_ep;
+
+#define NG_HCI_LEEV_ENH_CONN_COMPL 0x0a
+typedef struct {
+	u_int8_t 	status;
+	u_int16_t 	connection_handle;
+	u_int8_t	role;
+	u_int8_t 	peer_addr_type;
+	bdaddr_t 	peer_addr;
+	bdaddr_t 	local_res_private_addr;
+	bdaddr_t 	peer_res_private_addr;
+	u_int16_t 	conn_interval;
+	u_int16_t 	conn_latency;
+	u_int16_t 	supervision_timeout;
+	u_int8_t	master_clock_accuracy;
+}__attribute__((packed)) ng_hci_le_enh_conn_compl_ep;
 
 #define NG_HCI_EVENT_BT_LOGO			0xfe
 

@@ -50,7 +50,6 @@
 #include <sys/caprevoke.h>
 #include <sys/event.h>
 
-#include <machine/cpuregs.h>
 #include <machine/frame.h>
 #include <machine/trap.h>
 
@@ -322,6 +321,8 @@ cheritest_vm_cap_share_fd_kqueue(const struct cheri_test *ctp __unused)
 	}
 }
 
+extern int __sys_sigaction(int, const struct sigaction *, struct sigaction *);
+
 /*
  * We can rfork and share the sigaction table across parent and child, which
  * again allows for capability passing across address spaces.
@@ -335,8 +336,14 @@ cheritest_vm_cap_share_sigaction(const struct cheri_test *ctp __unused)
 	if (pid == -1)
 		cheritest_failure_errx("Fork failed; errno=%d", errno);
 
+	/*
+	 * Note: we call __sys_sigaction directly here, since the libthr
+	 * _thr_sigaction has a shadow list for the sigaction values
+	 * (per-process) and therefore does not read the new value installed by
+	 * the child process forked with RFSIGSHARE.
+	 */
 	if (pid == 0) {
-		void * __capability passme;
+		void *__capability passme;
 		struct sigaction sa;
 
 		bzero(&sa, sizeof(sa));
@@ -344,21 +351,32 @@ cheritest_vm_cap_share_sigaction(const struct cheri_test *ctp __unused)
 		/* This is a little abusive, but shows the point, I think */
 
 		passme = CHERITEST_CHECK_SYSCALL(mmap(0, PAGE_SIZE,
-				PROT_READ | PROT_WRITE | PROT_EXEC, MAP_ANON, -1, 0));
+		    PROT_READ | PROT_WRITE | PROT_EXEC, MAP_ANON, -1, 0));
 		sa.sa_handler = passme;
-		sa.sa_flags = 0;
 
-		CHERITEST_CHECK_SYSCALL(sigaction(SIGUSR1, &sa, NULL));
+		CHERITEST_CHECK_SYSCALL(__sys_sigaction(SIGUSR1, &sa, NULL));
+
+		/* Read it again and check that we get the same value back. */
+		CHERITEST_CHECK_SYSCALL(__sys_sigaction(SIGUSR1, NULL, &sa));
+		fprintf(stderr, "child value read from sigaction(): ");
+		CHERI_FPRINT_PTR(stderr, sa.sa_handler);
+		CHERITEST_CHECK_EQ_CAP(sa.sa_handler, passme);
+
 		exit(0);
 	} else {
 		struct sigaction sa;
 
 		waitpid(pid, NULL, 0);
 
-		sa.sa_handler = NULL;
-		CHERITEST_CHECK_SYSCALL(sigaction(SIGUSR1, NULL, &sa));
+		bzero(&sa, sizeof(sa));
+		sa.sa_flags = 1;
 
+		CHERITEST_CHECK_SYSCALL(__sys_sigaction(SIGUSR1, NULL, &sa));
+		fprintf(stderr, "parent sa read from sigaction(): ");
 		CHERI_FPRINT_PTR(stderr, sa.sa_handler);
+
+		/* Flags should be zero on read */
+		CHERITEST_CHECK_EQ_LONG(sa.sa_flags, 0);
 
 		if (cheri_gettag(sa.sa_handler)) {
 			cheritest_failure_errx("tag transfer");
@@ -828,7 +846,7 @@ test_caprevoke_capdirty(const struct cheri_test *ctp __unused)
 		caprevoke_shadow(CAPREVOKE_SHADOW_INFO_STRUCT, NULL,
 				 __DEQUALIFY_CAP(void * __capability *,&cri)));
 
-	revme = cheri_andperm(cheri_csetbounds(mb, 0x10),
+	revme = cheri_andperm(cheri_setbounds(mb, 0x10),
 			      ~CHERI_PERM_CHERIABI_VMMAP);
 	mb[0] = revme;
 
@@ -846,7 +864,7 @@ test_caprevoke_capdirty(const struct cheri_test *ctp __unused)
 	CHERI_FPRINT_PTR(stderr, mb[0]);
 
 	/* Between revocation sweeps, derive another cap and store */
-	revme = cheri_andperm(cheri_csetbounds(mb, 0x11),
+	revme = cheri_andperm(cheri_setbounds(mb, 0x11),
 			      ~CHERI_PERM_CHERIABI_VMMAP);
 	mb[1] = revme;
 
@@ -862,7 +880,7 @@ test_caprevoke_capdirty(const struct cheri_test *ctp __unused)
 	CHERI_FPRINT_PTR(stderr, mb[1]);
 
 	/* Between revocation sweeps, derive another cap and store */
-	revme = cheri_andperm(cheri_csetbounds(mb, 0x12),
+	revme = cheri_andperm(cheri_setbounds(mb, 0x12),
 			      ~CHERI_PERM_CHERIABI_VMMAP);
 	mb[2] = revme;
 
@@ -929,7 +947,7 @@ test_caprevoke_lib_init(
 		/* Create self-referential VMMAP-free capabilities */
 
 		bigblock[ix] = cheri_andperm(
-				cheri_csetbounds(&bigblock[ix], 16),
+				cheri_setbounds(&bigblock[ix], 16),
 				~CHERI_PERM_CHERIABI_VMMAP);
 	}
 	*obigblock = bigblock;
@@ -968,7 +986,7 @@ test_caprevoke_lib_run(
 		}
 
 		void * __capability * __capability chunk =
-			cheri_csetbounds(bigblock + bigblock_offset,
+			cheri_setbounds(bigblock + bigblock_offset,
 					 csz * sizeof(void * __capability));
 
 		if (verbose > 1) {
@@ -1050,7 +1068,7 @@ test_caprevoke_lib_run(
 
 			/* Put it back */
 			chunk[ix] = cheri_andperm(
-					cheri_csetbounds(&chunk[ix], 16),
+					cheri_setbounds(&chunk[ix], 16),
 					~CHERI_PERM_CHERIABI_VMMAP);
 		}
 

@@ -57,6 +57,11 @@
 #define	LINUX_MS_REMOUNT	0x0020
 
 /*
+ * umount2 flags
+ */
+#define	LINUX_MNT_FORCE		0x0001
+
+/*
  * common open/fcntl flags
  */
 #define	LINUX_O_RDONLY		00000000
@@ -71,7 +76,7 @@
 #define	LINUX_O_NONBLOCK	00004000
 #define	LINUX_O_NDELAY		LINUX_O_NONBLOCK
 #define	LINUX_O_SYNC		00010000
-#define	LINUX_FASYNC		00020000
+#define	LINUX_O_ASYNC		00020000
 #define	LINUX_O_DIRECT		00040000	/* Direct disk access hint */
 #define	LINUX_O_LARGEFILE	00100000
 #define	LINUX_O_DIRECTORY	00200000	/* Must be a directory */

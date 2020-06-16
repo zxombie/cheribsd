@@ -1000,6 +1000,8 @@ struct pfr_addr {
 
 enum { PFR_DIR_IN, PFR_DIR_OUT, PFR_DIR_MAX };
 enum { PFR_OP_BLOCK, PFR_OP_PASS, PFR_OP_ADDR_MAX, PFR_OP_TABLE_MAX };
+enum { PFR_TYPE_PACKETS, PFR_TYPE_BYTES, PFR_TYPE_MAX };
+#define	PFR_NUM_COUNTERS	(PFR_DIR_MAX * PFR_OP_ADDR_MAX * PFR_TYPE_MAX)
 #define PFR_OP_XPASS	PFR_OP_ADDR_MAX
 
 struct pfr_astats {
@@ -1045,10 +1047,12 @@ union sockaddr_union {
 #endif /* _SOCKADDR_UNION_DEFINED */
 
 struct pfr_kcounters {
-	counter_u64_t		 pfrkc_packets[PFR_DIR_MAX][PFR_OP_ADDR_MAX];
-	counter_u64_t		 pfrkc_bytes[PFR_DIR_MAX][PFR_OP_ADDR_MAX];
+	counter_u64_t		 pfrkc_counters;
 	long			 pfrkc_tzero;
 };
+#define	pfr_kentry_counter(kc, dir, op, t)		\
+	((kc)->pfrkc_counters +				\
+	    (dir) * PFR_OP_ADDR_MAX * PFR_TYPE_MAX + (op) * PFR_TYPE_MAX + (t))
 
 SLIST_HEAD(pfr_kentryworkq, pfr_kentry);
 struct pfr_kentry {
@@ -1305,8 +1309,8 @@ struct pfioc_state_kill {
 struct pfioc_states {
 	int	ps_len;
 	union {
-		caddr_t			 psu_buf;
-		struct pfsync_state	*psu_states;
+		char * __kerncap 	 psu_buf;
+		struct pfsync_state	* __kerncap psu_states;
 	} ps_u;
 #define ps_buf		ps_u.psu_buf
 #define ps_states	ps_u.psu_states
@@ -1315,8 +1319,8 @@ struct pfioc_states {
 struct pfioc_src_nodes {
 	int	psn_len;
 	union {
-		caddr_t		 psu_buf;
-		struct pf_src_node	*psu_src_nodes;
+		char * __kerncap		 psu_buf;
+		struct pf_src_node	* __kerncap psu_src_nodes;
 	} psn_u;
 #define psn_buf		psn_u.psu_buf
 #define psn_src_nodes	psn_u.psu_src_nodes
@@ -1401,7 +1405,7 @@ struct pfioc_trans {
 		int		rs_num;
 		char		anchor[MAXPATHLEN];
 		u_int32_t	ticket;
-	}		*array;
+	}		* __kerncap array;
 };
 
 #define PFR_FLAG_ATOMIC		0x00000001	/* unused */
@@ -1418,7 +1422,7 @@ struct pfioc_trans {
 
 struct pfioc_table {
 	struct pfr_table	 pfrio_table;
-	void			*pfrio_buffer;
+	void * __kerncap	 pfrio_buffer;
 	int			 pfrio_esize;
 	int			 pfrio_size;
 	int			 pfrio_size2;
@@ -1437,7 +1441,7 @@ struct pfioc_table {
 
 struct pfioc_iface {
 	char	 pfiio_name[IFNAMSIZ];
-	void	*pfiio_buffer;
+	void	* __kerncap pfiio_buffer;
 	int	 pfiio_esize;
 	int	 pfiio_size;
 	int	 pfiio_nzero;

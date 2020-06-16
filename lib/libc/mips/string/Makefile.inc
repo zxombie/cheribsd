@@ -4,7 +4,7 @@ MDSRCS+= \
 	ffs.S \
 	strlen.S
 
-.if ! ${MACHINE_ARCH:Mmips*c*}
+.if ! ${MACHINE_ABI:Mpurecap}
 MDSRCS+= \
 	bcmp.S \
 	bzero.S \
@@ -14,10 +14,11 @@ MDSRCS+= \
 	strrchr.S
 .endif
 
-.if ${MACHINE_ARCH:Mmips*c*} || ${MK_CHERI} == "yes"
+.if ${MACHINE_CPU:Mcheri}
 CHERI_MDSRCS=	\
 		memcpy_c.c \
-		memmove_c.c
+		memmove_c.c \
+		memset_c.c
 CHERI_MISRCS=	\
 		bcopy.c \
 		memcpy.c \
@@ -25,14 +26,9 @@ CHERI_MISRCS=	\
 
 MDSRCS+=	${CHERI_MDSRCS}
 
-.if ! ${MACHINE_ARCH:Mmips*c*}
-.if ${MK_CHERI128} == "yes"
-_CHERIBITS=128
-.else
-_CHERIBITS=256
-.endif
+.if ! ${MACHINE_ABI:Mpurecap}
 .for src in ${CHERI_MDSRCS} ${CHERI_MISRCS}
-CC.${src}=	${CC} -target cheri-unknown-freebsd -cheri=${_CHERIBITS}
+CC.${src}=	${CC} -target cheri-unknown-freebsd -cheri=128
 .endfor
 .endif
 

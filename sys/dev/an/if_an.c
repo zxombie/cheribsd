@@ -206,7 +206,7 @@ static char an_conf_cache[256];
 
 /* sysctl vars */
 
-static SYSCTL_NODE(_hw, OID_AUTO, an, CTLFLAG_RD, 0,
+static SYSCTL_NODE(_hw, OID_AUTO, an, CTLFLAG_RD | CTLFLAG_MPSAFE, 0,
     "Wireless driver parameters");
 
 /* XXX violate ethernet/netgraph callback hooks */
@@ -266,8 +266,10 @@ sysctl_an_dump(SYSCTL_HANDLER_ARGS)
 	return error;
 }
 
-SYSCTL_PROC(_hw_an, OID_AUTO, an_dump, CTLTYPE_STRING | CTLFLAG_RW,
-	    0, sizeof(an_conf), sysctl_an_dump, "A", "");
+SYSCTL_PROC(_hw_an, OID_AUTO, an_dump,
+    CTLTYPE_STRING | CTLFLAG_RW | CTLFLAG_NEEDGIANT, 0, sizeof(an_conf),
+    sysctl_an_dump, "A",
+    "");
 
 static int
 sysctl_an_cache_mode(SYSCTL_HANDLER_ARGS)
@@ -302,8 +304,10 @@ sysctl_an_cache_mode(SYSCTL_HANDLER_ARGS)
 	return error;
 }
 
-SYSCTL_PROC(_hw_an, OID_AUTO, an_cache_mode, CTLTYPE_STRING | CTLFLAG_RW,
-	    0, sizeof(an_conf_cache), sysctl_an_cache_mode, "A", "");
+SYSCTL_PROC(_hw_an, OID_AUTO, an_cache_mode,
+    CTLTYPE_STRING | CTLFLAG_RW | CTLFLAG_NEEDGIANT, 0, sizeof(an_conf_cache),
+    sysctl_an_cache_mode, "A",
+    "");
 
 /*
  * We probe for an Aironet 4500/4800 card by attempting to
@@ -1971,14 +1975,14 @@ an_ioctl(struct ifnet *ifp, u_long command, caddr_t data)
 		}
 		memcpy(areq, &sc->areq, sizeof(*areq));
 		AN_UNLOCK(sc);
-		error = copyout_c(areq, ifr_data_get_ptr(ifr), sizeof(*areq));
+		error = copyout(areq, ifr_data_get_ptr(ifr), sizeof(*areq));
 		free(areq, M_TEMP);
 		break;
 	case SIOCSAIRONET:
 		if ((error = priv_check(td, PRIV_DRIVER)))
 			goto out;
 		AN_LOCK(sc);
-		error = copyin_c(ifr_data_get_ptr(ifr), &sc->areq,
+		error = copyin(ifr_data_get_ptr(ifr), &sc->areq,
 		    sizeof(sc->areq));
 		if (error != 0)
 			break;
@@ -1988,7 +1992,7 @@ an_ioctl(struct ifnet *ifp, u_long command, caddr_t data)
 	case CASE_IOC_IFREQ(SIOCGPRIVATE_0):	/* used by Cisco client utility */
 		if ((error = priv_check(td, PRIV_DRIVER)))
 			goto out;
-		error = copyin_c(ifr_data_get_ptr(ifr), &l_ioctl,
+		error = copyin(ifr_data_get_ptr(ifr), &l_ioctl,
 		    sizeof(l_ioctl));
 		if (error)
 			goto out;
@@ -2007,14 +2011,14 @@ an_ioctl(struct ifnet *ifp, u_long command, caddr_t data)
 		AN_UNLOCK(sc);
 		if (!error) {
 			/* copy out the updated command info */
-			error = copyout_c(&l_ioctl, ifr_data_get_ptr(ifr),
+			error = copyout(&l_ioctl, ifr_data_get_ptr(ifr),
 			    sizeof(l_ioctl));
 		}
 		break;
 	case CASE_IOC_IFREQ(SIOCGPRIVATE_1):	/* used by Cisco client utility */
 		if ((error = priv_check(td, PRIV_DRIVER)))
 			goto out;
-		error = copyin_c(ifr_data_get_ptr(ifr), &l_ioctl,
+		error = copyin(ifr_data_get_ptr(ifr), &l_ioctl,
 		    sizeof(l_ioctl));
 		if (error)
 			goto out;

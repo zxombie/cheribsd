@@ -26,8 +26,6 @@
  * SUCH DAMAGE.
  */
 
-#define	EXPLICIT_USER_ACCESS
-
 #include <sys/cdefs.h>
 __FBSDID("$FreeBSD$");
 
@@ -134,7 +132,6 @@ retry:									\
 	}								\
 	(a) = next_file_id;						\
 } while(0)
-
 
 /* XXX wrong name; we're looking at version provision tags here, not modules */
 typedef TAILQ_HEAD(, modlist) modlisthead_t;
@@ -372,8 +369,7 @@ linker_file_register_modules(linker_file_t lf)
 
 	sx_assert(&kld_sx, SA_XLOCKED);
 
-	if (linker_file_lookup_set(lf, "modmetadata_set", &start,
-	    &stop, NULL) != 0) {
+	if (linker_file_lookup_set(lf, MDT_SETNAME, &start, &stop, NULL) != 0) {
 		/*
 		 * This fallback should be unnecessary, but if we get booted
 		 * from boot2 instead of loader and we are missing our
@@ -1116,7 +1112,7 @@ user_kldload(struct thread *td, const char * __capability file)
 	td->td_retval[0] = -1;
 
 	pathname = malloc(MAXPATHLEN, M_TEMP, M_WAITOK);
-	error = copyinstr_c(file, pathname, MAXPATHLEN, NULL);
+	error = copyinstr(file, pathname, MAXPATHLEN, NULL);
 	if (error == 0) {
 		error = kern_kldload(td, pathname, &fileid);
 		if (error == 0)
@@ -1213,7 +1209,7 @@ kern_kldfind(struct thread *td, const char * __capability file)
 	td->td_retval[0] = -1;
 
 	pathname = malloc(MAXPATHLEN, M_TEMP, M_WAITOK);
-	if ((error = copyinstr_c(file, pathname, MAXPATHLEN, NULL)) != 0)
+	if ((error = copyinstr(file, pathname, MAXPATHLEN, NULL)) != 0)
 		goto out;
 
 	filename = linker_basename(pathname);
@@ -1317,7 +1313,7 @@ kern_kldstat(struct thread *td, int fileid, struct kld_file_stat *stat)
 	bcopy(lf->filename, &stat->name[0], namelen);
 	stat->refs = lf->refs;
 	stat->id = lf->id;
-	stat->address = lf->address;
+	stat->address = (char * __capability)(uintcap_t)lf->address;
 	stat->size = lf->size;
 	/* Version 2 fields: */
 	namelen = strlen(lf->pathname) + 1;
@@ -1415,7 +1411,7 @@ kern_kldsym(struct thread *td, int fileid, int cmd,
 #endif
 
 	symstr = malloc(MAXPATHLEN, M_TEMP, M_WAITOK);
-	error = copyinstr_c(symname, symstr, MAXPATHLEN, NULL);
+	error = copyinstr(symname, symstr, MAXPATHLEN, NULL);
 	if (error != 0)
 		goto done;
 	sx_xlock(&kld_sx);
@@ -1799,7 +1795,7 @@ SYSCTL_STRING(_kern, OID_AUTO, module_path, CTLFLAG_RWTUN, linker_path,
 
 TUNABLE_STR("module_path", linker_path, sizeof(linker_path));
 
-static char *linker_ext_list[] = {
+static const char * const linker_ext_list[] = {
 	"",
 	".ko",
 	NULL
@@ -1816,7 +1812,8 @@ linker_lookup_file(const char *path, int pathlen, const char *name,
 {
 	struct nameidata nd;
 	struct thread *td = curthread;	/* XXX */
-	char *result, **cpp, *sep;
+	const char * const *cpp, *sep;
+	char *result;
 	int error, len, extlen, reclen, flags;
 	enum vtype type;
 
@@ -1872,8 +1869,9 @@ linker_hints_lookup(const char *path, int pathlen, const char *modname,
 	struct ucred *cred = td ? td->td_ucred : NULL;
 	struct nameidata nd;
 	struct vattr vattr, mattr;
+	const char *best, *sep;
 	u_char *hints = NULL;
-	u_char *cp, *recptr, *bufend, *result, *best, *pathbuf, *sep;
+	u_char *cp, *recptr, *bufend, *result, *pathbuf;
 	int error, ival, bestver, *intp, found, flags, clen, blen;
 	ssize_t reclen;
 
@@ -1903,7 +1901,7 @@ linker_hints_lookup(const char *path, int pathlen, const char *modname,
 	 * XXX: we need to limit this number to some reasonable value
 	 */
 	if (vattr.va_size > LINKER_HINTS_MAX) {
-		printf("hints file too large %ld\n", (long)vattr.va_size);
+		printf("linker.hints file too large %ld\n", (long)vattr.va_size);
 		goto bad;
 	}
 	hints = malloc(vattr.va_size, M_TEMP, M_WAITOK);
@@ -1921,7 +1919,7 @@ linker_hints_lookup(const char *path, int pathlen, const char *modname,
 	intp = (int *)hints;
 	ival = *intp++;
 	if (ival != LINKER_HINTS_VERSION) {
-		printf("hints file version mismatch %d\n", ival);
+		printf("linker.hints file version mismatch %d\n", ival);
 		goto bad;
 	}
 	bufend = hints + vattr.va_size;
@@ -2095,6 +2093,22 @@ linker_hwpmc_list_objects(void)
 }
 #endif
 
+/* check if root file system is not mounted */
+static bool
+linker_root_mounted(void)
+{
+	struct pwd *pwd;
+	bool ret;
+
+	if (rootvnode == NULL)
+		return (false);
+
+	pwd = pwd_hold(curthread);
+	ret = pwd->pwd_rdir != NULL;
+	pwd_drop(pwd);
+	return (ret);
+}
+
 /*
  * Find a file which contains given module and load it, if "parent" is not
  * NULL, register a reference to it.
@@ -2116,15 +2130,13 @@ linker_load_module(const char *kldname, const char *modname,
  		 */
 		KASSERT(verinfo == NULL, ("linker_load_module: verinfo"
 		    " is not NULL"));
-		/* check if root file system is not mounted */
-		if (rootvnode == NULL || curproc->p_fd->fd_rdir == NULL)
+		if (!linker_root_mounted())
 			return (ENXIO);
 		pathname = linker_search_kld(kldname);
 	} else {
 		if (modlist_lookup2(modname, verinfo) != NULL)
 			return (EEXIST);
-		/* check if root file system is not mounted */
-		if (rootvnode == NULL || curproc->p_fd->fd_rdir == NULL)
+		if (!linker_root_mounted())
 			return (ENXIO);
 		if (kldname != NULL)
 			pathname = strdup(kldname, M_LINKER);
@@ -2292,8 +2304,10 @@ sysctl_kern_function_list(SYSCTL_HANDLER_ARGS)
 	return (SYSCTL_OUT(req, "", 1));
 }
 
-SYSCTL_PROC(_kern, OID_AUTO, function_list, CTLTYPE_OPAQUE | CTLFLAG_RD,
-    NULL, 0, sysctl_kern_function_list, "", "kernel function list");
+SYSCTL_PROC(_kern, OID_AUTO, function_list,
+    CTLTYPE_OPAQUE | CTLFLAG_RD | CTLFLAG_MPSAFE, NULL, 0,
+    sysctl_kern_function_list, "",
+    "kernel function list");
 // CHERI CHANGES START
 // {
 //   "updated": 20181114,

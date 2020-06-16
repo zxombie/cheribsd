@@ -116,7 +116,7 @@ struct lagg_reqall {
 	u_int			ra_proto;		/* lagg protocol */
 
 	size_t			ra_size;		/* size of buffer */
-	struct lagg_reqport	*ra_port;		/* allocated buffer */
+	struct lagg_reqport	* __kerncap ra_port;	/* allocated buffer */
 	int			ra_ports;		/* total port count */
 	union {
 		struct lacp_opreq rpsc_lacp;
@@ -148,7 +148,7 @@ struct lagg_reqopts {
 #define	LAGG_OPT_LACP_STRICT		0x10		/* LACP strict mode */
 #define	LAGG_OPT_LACP_TXTEST		0x20		/* LACP debug: txtest */
 #define	LAGG_OPT_LACP_RXTEST		0x40		/* LACP debug: rxtest */
-#define	LAGG_OPT_LACP_TIMEOUT		0x80		/* LACP timeout */
+#define	LAGG_OPT_LACP_FAST_TIMO		0x80		/* LACP fast timeout */
 #define	LAGG_OPT_RR_LIMIT		0x100		/* RR stride */
 	u_int			ro_count;		/* number of ports */
 	u_int			ro_active;		/* active port count */
@@ -162,7 +162,7 @@ struct lagg_reqopts {
 
 #define	LAGG_OPT_BITS		"\020\001USE_FLOWID\003USE_NUMA" \
 				"\005LACP_STRICT\006LACP_TXTEST" \
-				"\007LACP_RXTEST"
+				"\007LACP_RXTEST\010LACP_FAST_TIMO"
 
 #ifdef _KERNEL
 

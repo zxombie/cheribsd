@@ -35,8 +35,6 @@ __FBSDID("$FreeBSD$");
 #include "opt_inet.h"
 #include "opt_inet6.h"
 
-#define	EXPLICIT_USER_ACCESS
-
 #include <sys/param.h>
 #include <sys/types.h>
 #include <sys/kernel.h>
@@ -50,6 +48,7 @@ __FBSDID("$FreeBSD$");
 #include <sys/taskqueue.h>
 #include <sys/fcntl.h>
 #include <sys/jail.h>
+#include <sys/linker.h>
 #include <sys/lock.h>
 #include <sys/mutex.h>
 #include <sys/racct.h>
@@ -63,6 +62,7 @@ __FBSDID("$FreeBSD$");
 #include <sys/socket.h>
 #include <sys/syscallsubr.h>
 #include <sys/sysctl.h>
+#include <sys/uuid.h>
 #include <sys/vnode.h>
 
 #include <net/if.h>
@@ -77,6 +77,7 @@ __FBSDID("$FreeBSD$");
 #include <security/mac/mac_framework.h>
 
 #define	DEFAULT_HOSTUUID	"00000000-0000-0000-0000-000000000000"
+#define	PRISON0_HOSTUUID_MODULE	"hostuuid"
 
 MALLOC_DEFINE(M_PRISON, "prison", "Prison structures");
 static MALLOC_DEFINE(M_PRISON_RACCT, "prison_racct", "Prison racct structures");
@@ -220,10 +221,38 @@ static unsigned jail_max_af_ips = 255;
 void
 prison0_init(void)
 {
+	uint8_t *file, *data;
+	size_t size;
 
 	prison0.pr_cpuset = cpuset_ref(thread0.td_cpuset);
 	prison0.pr_osreldate = osreldate;
 	strlcpy(prison0.pr_osrelease, osrelease, sizeof(prison0.pr_osrelease));
+
+	/* If we have a preloaded hostuuid, use it. */
+	file = preload_search_by_type(PRISON0_HOSTUUID_MODULE);
+	if (file != NULL) {
+		data = preload_fetch_addr(file);
+		size = preload_fetch_size(file);
+		if (data != NULL) {
+			/*
+			 * The preloaded data may include trailing whitespace, almost
+			 * certainly a newline; skip over any whitespace or
+			 * non-printable characters to be safe.
+			 */
+			while (size > 0 && data[size - 1] <= 0x20) {
+				data[size--] = '\0';
+			}
+			if (validate_uuid(data, size, NULL, 0) == 0) {
+				(void)strlcpy(prison0.pr_hostuuid, data,
+				    size + 1);
+			} else if (bootverbose) {
+				printf("hostuuid: preload data malformed: '%s'",
+				    data);
+			}
+		}
+	}
+	if (bootverbose)
+		printf("hostuuid: using %s\n", prison0.pr_hostuuid);
 }
 
 /*
@@ -499,7 +528,6 @@ kern_jail_set(struct thread *td, struct uio *optuio, int flags)
 	int gotchildmax, gotenforce, gothid, gotrsnum, gotslevel;
 	int jid, jsys, len, level;
 	int childmax, osreldt, rsnum, slevel;
-	int fullpath_disabled;
 #if defined(INET) || defined(INET6)
 	int ii, ij;
 #endif
@@ -875,8 +903,12 @@ kern_jail_set(struct thread *td, struct uio *optuio, int flags)
 			    "osrelease cannot be changed after creation");
 			goto done_errmsg;
 		}
-		if (len == 0 || len >= OSRELEASELEN) {
+		if (len == 0 || osrelstr[len - 1] != '\0') {
 			error = EINVAL;
+			goto done_free;
+		}
+		if (len >= OSRELEASELEN) {
+			error = ENAMETOOLONG;
 			vfs_opterror(opts,
 			    "osrelease string must be 1-%d bytes long",
 			    OSRELEASELEN - 1);
@@ -903,7 +935,6 @@ kern_jail_set(struct thread *td, struct uio *optuio, int flags)
 		}
 	}
 
-	fullpath_disabled = 0;
 	root = NULL;
 	error = vfs_getopt(opts, "path", (void **)&path, &len);
 	if (error == ENOENT)
@@ -931,13 +962,8 @@ kern_jail_set(struct thread *td, struct uio *optuio, int flags)
 		g_path = malloc(MAXPATHLEN, M_TEMP, M_WAITOK);
 		strlcpy(g_path, path, MAXPATHLEN);
 		error = vn_path_to_global_path(td, root, g_path, MAXPATHLEN);
-		if (error == 0)
+		if (error == 0) {
 			path = g_path;
-		else if (error == ENODEV) {
-			/* proceed if sysctl debug.disablefullpath == 1 */
-			fullpath_disabled = 1;
-			if (len < 2 || (len == 2 && path[0] == '/'))
-				path = NULL;
 		} else {
 			/* exit on other errors */
 			goto done_free;
@@ -948,15 +974,6 @@ kern_jail_set(struct thread *td, struct uio *optuio, int flags)
 			goto done_free;
 		}
 		VOP_UNLOCK(root);
-		if (fullpath_disabled) {
-			/* Leave room for a real-root full pathname. */
-			if (len + (path[0] == '/' && strcmp(mypr->pr_path, "/")
-			    ? strlen(mypr->pr_path) : 0) > MAXPATHLEN) {
-				error = ENAMETOOLONG;
-				vrele(root);
-				goto done_free;
-			}
-		}
 	}
 
 	/*
@@ -1266,9 +1283,11 @@ kern_jail_set(struct thread *td, struct uio *optuio, int flags)
 
 		pr->pr_osreldate = osreldt ? osreldt : ppr->pr_osreldate;
 		if (osrelstr == NULL)
-		    strcpy(pr->pr_osrelease, ppr->pr_osrelease);
+			strlcpy(pr->pr_osrelease, ppr->pr_osrelease,
+			    sizeof(pr->pr_osrelease));
 		else
-		    strcpy(pr->pr_osrelease, osrelstr);
+			strlcpy(pr->pr_osrelease, osrelstr,
+			    sizeof(pr->pr_osrelease));
 
 		LIST_INIT(&pr->pr_children);
 		mtx_init(&pr->pr_mtx, "jail mutex", NULL, MTX_DEF | MTX_DUPOK);
@@ -1661,12 +1680,7 @@ kern_jail_set(struct thread *td, struct uio *optuio, int flags)
 	}
 	if (path != NULL) {
 		/* Try to keep a real-rooted full pathname. */
-		if (fullpath_disabled && path[0] == '/' &&
-		    strcmp(mypr->pr_path, "/"))
-			snprintf(pr->pr_path, sizeof(pr->pr_path), "%s%s",
-			    mypr->pr_path, path);
-		else
-			strlcpy(pr->pr_path, path, sizeof(pr->pr_path));
+		strlcpy(pr->pr_path, path, sizeof(pr->pr_path));
 		pr->pr_root = root;
 	}
 	if (PR_HOST & ch_flags & ~pr_flags) {
@@ -1903,7 +1917,6 @@ kern_jail_set(struct thread *td, struct uio *optuio, int flags)
 	vfs_freeopts(opts);
 	return (error);
 }
-
 
 /*
  * struct jail_get_args {
@@ -2226,7 +2239,6 @@ kern_jail_get(struct thread *td, struct uio *optuio, int flags)
 	return (error);
 }
 
-
 /*
  * struct jail_remove_args {
  *	int jid;
@@ -2325,7 +2337,6 @@ prison_remove_one(struct prison *pr)
 	/* Remove the temporary reference added by jail_remove. */
 	prison_deref(pr, deuref | PD_DEREF);
 }
-
 
 /*
  * struct jail_attach_args {
@@ -2442,7 +2453,6 @@ do_jail_attach(struct thread *td, struct prison *pr)
 	prison_deref(pr, PD_DEREF | PD_DEUREF);
 	return (error);
 }
-
 
 /*
  * Returns a locked prison instance, or NULL on failure.
@@ -2865,16 +2875,6 @@ prison_ischild(struct prison *pr1, struct prison *pr2)
 }
 
 /*
- * Return 1 if the passed credential is in a jail, otherwise 0.
- */
-int
-jailed(struct ucred *cred)
-{
-
-	return (cred->cr_prison != &prison0);
-}
-
-/*
  * Return 1 if the passed credential is in a jail and that jail does not
  * have its own virtual network stack, otherwise 0.
  */
@@ -2934,6 +2934,15 @@ getcredhostid(struct ucred *cred, unsigned long *hostid)
 
 	mtx_lock(&cred->cr_prison->pr_mtx);
 	*hostid = cred->cr_prison->pr_hostid;
+	mtx_unlock(&cred->cr_prison->pr_mtx);
+}
+
+void
+getjailname(struct ucred *cred, char *name, size_t len)
+{
+
+	mtx_lock(&cred->cr_prison->pr_mtx);
+	strlcpy(name, cred->cr_prison->pr_name, len);
 	mtx_unlock(&cred->cr_prison->pr_mtx);
 }
 
@@ -3051,6 +3060,16 @@ prison_enforce_statfs(struct ucred *cred, struct mount *mp, struct statfs *sp)
 int
 prison_priv_check(struct ucred *cred, int priv)
 {
+
+	/*
+	 * Some policies have custom handlers. This routine should not be
+	 * called for them. See priv_check_cred().
+	 */
+	switch (priv) {
+	case PRIV_VFS_GENERATION:
+		KASSERT(0, ("prison_priv_check instead of a custom handler "
+		    "called for %d\n", priv));
+	}
 
 	if (!jailed(cred))
 		return (0);
@@ -3322,6 +3341,14 @@ prison_priv_check(struct ucred *cred, int priv)
 			return (EPERM);
 
 		/*
+		 * Jails should hold no disposition on the PRIV_VFS_READ_DIR
+		 * policy.  priv_check_cred will not specifically allow it, and
+		 * we may want a MAC policy to allow it.
+		 */
+	case PRIV_VFS_READ_DIR:
+		return (0);
+
+		/*
 		 * Conditionnaly allow locking (unlocking) physical pages
 		 * in memory.
 		 */
@@ -3445,11 +3472,10 @@ prison_path(struct prison *pr1, struct prison *pr2)
 	return (path2);
 }
 
-
 /*
  * Jail-related sysctls.
  */
-static SYSCTL_NODE(_security, OID_AUTO, jail, CTLFLAG_RW, 0,
+static SYSCTL_NODE(_security, OID_AUTO, jail, CTLFLAG_RW | CTLFLAG_MPSAFE, 0,
     "Jails");
 
 static int
@@ -3688,7 +3714,7 @@ SYSCTL_PROC(_security_jail, OID_AUTO, devfs_ruleset,
  * is returned in the string itself, and the other parameters exist merely
  * to make themselves and their types known.
  */
-SYSCTL_NODE(_security_jail, OID_AUTO, param, CTLFLAG_RW, 0,
+SYSCTL_NODE(_security_jail, OID_AUTO, param, CTLFLAG_RW | CTLFLAG_MPSAFE, 0,
     "Jail parameters");
 
 int
@@ -3898,7 +3924,7 @@ prison_add_allow(const char *prefix, const char *name, const char *prefix_descr,
 	parent = prefix
 	    ? SYSCTL_ADD_NODE(NULL,
 		  SYSCTL_CHILDREN(&sysctl___security_jail_param_allow),
-		  OID_AUTO, prefix, 0, 0, prefix_descr)
+		  OID_AUTO, prefix, CTLFLAG_MPSAFE, 0, prefix_descr)
 	    : &sysctl___security_jail_param_allow;
 	(void)SYSCTL_ADD_PROC(NULL, SYSCTL_CHILDREN(parent), OID_AUTO,
 	    name, CTLTYPE_INT | CTLFLAG_RW | CTLFLAG_MPSAFE,

@@ -78,12 +78,14 @@ __FBSDID("$FreeBSD$");
 #define	LDD_SETENV(name, value, overwrite) do {		\
 	setenv("LD_" name, value, overwrite);		\
 	setenv("LD_32_" name, value, overwrite);	\
+	setenv("LD_64_" name, value, overwrite);	\
 	setenv("LD_CHERI_" name, value, overwrite);	\
 } while (0)
 
 #define	LDD_UNSETENV(name) do {		\
 	unsetenv("LD_" name);		\
 	unsetenv("LD_32_" name);	\
+	unsetenv("LD_64_" name);	\
 	unsetenv("LD_CHERI_" name);	\
 } while (0)
 
@@ -380,6 +382,7 @@ is_executable(const char *fname, int fd, int *is_shlib, int *type,
 			return (0);
 		}
 		*type = TYPE_AOUT;
+		warnx("%s: aout support is deprecated", fname);
 		return (1);
 	}
 #endif

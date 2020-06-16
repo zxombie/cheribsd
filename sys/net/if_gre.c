@@ -41,8 +41,6 @@ __FBSDID("$FreeBSD$");
 #include "opt_inet6.h"
 #include "opt_rss.h"
 
-#define	EXPLICIT_USER_ACCESS
-
 #include <sys/param.h>
 #include <sys/kernel.h>
 #include <sys/lock.h>
@@ -109,6 +107,9 @@ static void	gre_clone_destroy(struct ifnet *);
 VNET_DEFINE_STATIC(struct if_clone *, gre_cloner);
 #define	V_gre_cloner	VNET(gre_cloner)
 
+#ifdef VIMAGE
+static void	gre_reassign(struct ifnet *, struct vnet *, char *);
+#endif
 static void	gre_qflush(struct ifnet *);
 static int	gre_transmit(struct ifnet *, struct mbuf *);
 static int	gre_ioctl(struct ifnet *, u_long, caddr_t);
@@ -117,7 +118,7 @@ static int	gre_output(struct ifnet *, struct mbuf *,
 static void	gre_delete_tunnel(struct gre_softc *);
 
 SYSCTL_DECL(_net_link);
-static SYSCTL_NODE(_net_link, IFT_TUNNEL, gre, CTLFLAG_RW, 0,
+static SYSCTL_NODE(_net_link, IFT_TUNNEL, gre, CTLFLAG_RW | CTLFLAG_MPSAFE, 0,
     "Generic Routing Encapsulation");
 #ifndef MAX_GRE_NEST
 /*
@@ -185,12 +186,30 @@ gre_clone_create(struct if_clone *ifc, int unit, void * __capability params)
 	GRE2IFP(sc)->if_ioctl = gre_ioctl;
 	GRE2IFP(sc)->if_transmit = gre_transmit;
 	GRE2IFP(sc)->if_qflush = gre_qflush;
+#ifdef VIMAGE
+	GRE2IFP(sc)->if_reassign = gre_reassign;
+#endif
 	GRE2IFP(sc)->if_capabilities |= IFCAP_LINKSTATE;
 	GRE2IFP(sc)->if_capenable |= IFCAP_LINKSTATE;
 	if_attach(GRE2IFP(sc));
 	bpfattach(GRE2IFP(sc), DLT_NULL, sizeof(u_int32_t));
 	return (0);
 }
+
+#ifdef VIMAGE
+static void
+gre_reassign(struct ifnet *ifp, struct vnet *new_vnet __unused,
+    char *unused __unused)
+{
+	struct gre_softc *sc;
+
+	sx_xlock(&gre_ioctl_sx);
+	sc = ifp->if_softc;
+	if (sc != NULL)
+		gre_delete_tunnel(sc);
+	sx_xunlock(&gre_ioctl_sx);
+}
+#endif /* VIMAGE */
 
 static void
 gre_clone_destroy(struct ifnet *ifp)
@@ -389,7 +408,7 @@ gre_delete_tunnel(struct gre_softc *sc)
 	if ((gs = sc->gre_so) != NULL && CK_LIST_EMPTY(&gs->list)) {
 		CK_LIST_REMOVE(gs, chain);
 		soclose(gs->so);
-		epoch_call(net_epoch_preempt, &gs->epoch_ctx, gre_sofree);
+		NET_EPOCH_CALL(gre_sofree, &gs->epoch_ctx);
 		sc->gre_so = NULL;
 	}
 	GRE2IFP(sc)->if_drv_flags &= ~IFF_DRV_RUNNING;

@@ -23,9 +23,25 @@
 # This file may be included multiple times, but only has effect the first time.
 #
 
-.if !target(__<bsd.linker.mk>__) && !defined(_NO_INCLUDE_LINKERMK) && \
-    !defined(_NO_INCLUDE_COMPILERMK)
+.if !target(__<bsd.linker.mk>__)
 __<bsd.linker.mk>__:
+
+.if defined(_NO_INCLUDE_LINKERMK) || defined(_NO_INCLUDE_COMPILERMK)
+# If _NO_INCLUDE_COMPILERMK is set we are doing a make obj/cleandir/cleanobj
+# and might not have a valid compiler in $PATH yet. In this case just set the
+# variables that are expected by the other .mk files and return
+LINKER_TYPE?=		unknown
+LINKER_VERSION?=	0
+LINKER_FEATURES?=
+LINKER_FREEBSD_VERSION?= 0
+.if !empty(_WANT_TOOLCHAIN_CROSS_VARS)
+X_LINKER_TYPE?=		${LINKER_TYPE}
+X_LINKER_VERSION?=	${LINKER_VERSION}
+X_LINKER_FEATURES?=	${LINKER_FEATURES}
+X_LINKER_FREEBSD_VERSION?= ${LINKER_FREEBSD_VERSION}
+.endif
+
+.else
 
 _ld_vars=LD $${_empty_var_}
 .if !empty(_WANT_TOOLCHAIN_CROSS_VARS)
@@ -76,13 +92,15 @@ _ld_version!=	(${${ld}} -v 2>&1 || echo none) | sed -n 1p
 .if ${_ld_version:[1..2]} == "GNU ld"
 ${X_}LINKER_TYPE=	bfd
 ${X_}LINKER_FREEBSD_VERSION=	0
-_v=	${_ld_version:M[1-9].[0-9]*:[1]}
+_v=	${_ld_version:M[1-9]*.[0-9]*:[1]}
 .elif ${_ld_version:[1]} == "LLD"
 ${X_}LINKER_TYPE=	lld
 _v=	${_ld_version:[2]}
-${X_}LINKER_FREEBSD_VERSION!= \
-	${${ld}} -v | \
-	awk '$$3 ~ /FreeBSD/ {print substr($$4, 1, length($$4)-1)}'
+.if ${_ld_version:[3]} == "(FreeBSD"
+${X_}LINKER_FREEBSD_VERSION:=	${_ld_version:[4]:C/.*-([^-]*)\)/\1/}
+.else
+${X_}LINKER_FREEBSD_VERSION=	0
+.endif
 .elif ${_ld_version:[1]} == "@(#)PROGRAM:ld"
 ${X_}LINKER_TYPE=	mac
 .elif ${_ld_version:[1]} == "@(\#)PROGRAM:ld"
@@ -148,5 +166,5 @@ ${var}__${${X_}_ld_hash}:=	${${var}}
 .endif	# ${ld} == "LD" || !empty(XLD)
 .endfor	# .for ld in LD XLD
 
-
+.endif	# defined(_NO_INCLUDE_LINKERMK) || defined(_NO_INCLUDE_COMPILERMK)
 .endif	# !target(__<bsd.linker.mk>__)

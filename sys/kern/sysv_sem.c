@@ -49,11 +49,10 @@ __FBSDID("$FreeBSD$");
 
 #include "opt_sysvipc.h"
 
-#define	EXPLICIT_USER_ACCESS
-
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/sysproto.h>
+#include <sys/abi_compat.h>
 #include <sys/eventhandler.h>
 #include <sys/kernel.h>
 #include <sys/proc.h>
@@ -200,15 +199,15 @@ struct sem_undo {
  * semaphore info struct
  */
 struct seminfo seminfo = {
-                SEMMNI,         /* # of semaphore identifiers */
-                SEMMNS,         /* # of semaphores in system */
-                SEMMNU,         /* # of undo structures in system */
-                SEMMSL,         /* max # of semaphores per id */
-                SEMOPM,         /* max # of operations per semop call */
-                SEMUME,         /* max # of undo entries per process */
-                SEMUSZ,         /* size in bytes of undo structure */
-                SEMVMX,         /* semaphore maximum value */
-                SEMAEM          /* adjust on exit max value */
+	.semmni =	SEMMNI,	/* # of semaphore identifiers */
+	.semmns =	SEMMNS,	/* # of semaphores in system */
+	.semmnu =	SEMMNU,	/* # of undo structures in system */
+	.semmsl =	SEMMSL,	/* max # of semaphores per id */
+	.semopm =	SEMOPM,	/* max # of operations per semop call */
+	.semume =	SEMUME,	/* max # of undo entries per process */
+	.semusz =	SEMUSZ,	/* size in bytes of undo structure */
+	.semvmx =	SEMVMX,	/* semaphore maximum value */
+	.semaem =	SEMAEM,	/* adjust on exit max value */
 };
 
 SYSCTL_INT(_kern_ipc, OID_AUTO, semmni, CTLFLAG_RDTUN, &seminfo.semmni, 0,
@@ -703,8 +702,15 @@ sem_remove(int semidx, struct ucred *cred)
 	int i;
 
 	KASSERT(semidx >= 0 && semidx < seminfo.semmni,
-		("semidx out of bounds"));
+	    ("semidx out of bounds"));
+	mtx_assert(&sem_mtx, MA_OWNED);
 	semakptr = &sema[semidx];
+	KASSERT((__cheri_fromcap struct sem *)semakptr->u.__sem_base -
+	    sem + semakptr->u.sem_nsems <= semtot,
+	    ("sem_remove: sema %d corrupted sem pointer %p %p %d %d",
+	    semidx, (__cheri_fromcap struct sem *)semakptr->u.__sem_base,
+	    sem, semakptr->u.sem_nsems, semtot));
+
 	semakptr->u.sem_perm.cuid = cred ? cred->cr_uid : 0;
 	semakptr->u.sem_perm.uid = cred ? cred->cr_uid : 0;
 	semakptr->u.sem_perm.mode = 0;
@@ -723,8 +729,9 @@ sem_remove(int semidx, struct ucred *cred)
 		    sema[i].u.__sem_base > semakptr->u.__sem_base)
 			mtx_lock_flags(&sema_mtx[i], LOP_DUPOK);
 	}
-	for (i = (__cheri_fromcap struct sem *)semakptr->u.__sem_base - sem; i < semtot; i++)
-		sem[i] = sem[i + semakptr->u.sem_nsems];
+	for (i = (__cheri_fromcap struct sem *)semakptr->u.__sem_base -
+	    sem + semakptr->u.sem_nsems; i < semtot; i++)
+		sem[i - semakptr->u.sem_nsems] = sem[i];
 	for (i = 0; i < seminfo.semmni; i++) {
 		if ((sema[i].u.sem_perm.mode & SEM_ALLOC) &&
 		    sema[i].u.__sem_base > semakptr->u.__sem_base) {
@@ -1376,7 +1383,7 @@ kern_semop(struct thread *td, int usemid, struct sembuf * __capability usops,
 		    (__cheri_fromcap struct sembuf *)usops, sops,
 		    nsops * sizeof(sops[0])));
 		if (sops != small_sops)
-			free(sops, M_SEM);
+			free(sops, M_TEMP);
 		return (error);
 	}
 
@@ -1627,7 +1634,7 @@ done:
 done2:
 	mtx_unlock(sema_mtxp);
 	if (sops != small_sops)
-		free(sops, M_SEM);
+		free(sops, M_TEMP);
 	return (error);
 }
 
@@ -2011,10 +2018,6 @@ sys_semsys(td, uap)
 	error = (*semcalls[uap->which])(td, &uap->a2);
 	return (error);
 }
-
-#ifndef CP
-#define CP(src, dst, fld)	do { (dst).fld = (src).fld; } while (0)
-#endif
 
 #ifndef _SYS_SYSPROTO_H_
 struct freebsd7___semctl_args {

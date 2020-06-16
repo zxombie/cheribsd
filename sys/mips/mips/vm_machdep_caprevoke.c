@@ -339,7 +339,7 @@ vm_caprevoke_page(const struct vm_caprevoke_cookie *crc, vm_page_t m)
 	mva = MIPS_PHYS_TO_DIRECT(mpa);
 	mve = mva + pagesizes[m->psind];
 
-	mvu = cheri_csetbounds(cheri_setaddress(kdc, mva), pagesizes[m->psind]);
+	mvu = cheri_setbounds(cheri_setaddress(kdc, mva), pagesizes[m->psind]);
 
 	res = vm_caprevoke_page_iter(crc, vm_do_caprevoke, mvu, mve);
 
@@ -414,7 +414,7 @@ vm_caprevoke_page_ro(const struct vm_caprevoke_cookie *crc, vm_page_t m)
 	mva = MIPS_PHYS_TO_DIRECT(mpa);
 	mve = mva + pagesizes[m->psind];
 
-	mvu = cheri_csetbounds(cheri_setaddress(kdc, mva), pagesizes[m->psind]);
+	mvu = cheri_setbounds(cheri_setaddress(kdc, mva), pagesizes[m->psind]);
 
 	res = vm_caprevoke_page_iter(crc, vm_caprevoke_page_ro_adapt, mvu, mve);
 
@@ -450,7 +450,7 @@ vm_map_install_caprevoke_shadow(vm_map_t map)
 	error = vm_map_insert(map, vmo, 0, start, end,
 				VM_PROT_READ | VM_PROT_WRITE,
 				VM_PROT_READ | VM_PROT_WRITE,
-				0);
+				0, start);
 
 	if (error != KERN_SUCCESS) {
 		goto out;
@@ -534,7 +534,7 @@ void
 vm_caprevoke_publish(const struct vm_caprevoke_cookie *vmcrc,
 			 const struct caprevoke_info *ip)
 {
-	int res = copyout_c(ip, &vmcrc->info_page->pub, sizeof(*ip));
+	int res = copyoutcap(ip, &vmcrc->info_page->pub, sizeof(*ip));
 	KASSERT(res == 0, ("vm_caprevoke_publish: bad copyout %d\n", res));
 	(void)res;
 }

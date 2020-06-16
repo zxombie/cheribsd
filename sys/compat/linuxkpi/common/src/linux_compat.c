@@ -91,7 +91,8 @@ __FBSDID("$FreeBSD$");
 #include <asm/smp.h>
 #endif
 
-SYSCTL_NODE(_compat, OID_AUTO, linuxkpi, CTLFLAG_RW, 0, "LinuxKPI parameters");
+SYSCTL_NODE(_compat, OID_AUTO, linuxkpi, CTLFLAG_RW | CTLFLAG_MPSAFE, 0,
+    "LinuxKPI parameters");
 
 int linuxkpi_debug;
 SYSCTL_INT(_compat_linuxkpi, OID_AUTO, debug, CTLFLAG_RWTUN,
@@ -524,14 +525,14 @@ linux_cdev_pager_populate(vm_object_t vm_obj, vm_pindex_t pidx, int fault_type,
 	struct vm_area_struct *vmap;
 	int err;
 
-	linux_set_current(curthread);
-
 	/* get VM area structure */
 	vmap = linux_cdev_handle_find(vm_obj->handle);
 	MPASS(vmap != NULL);
 	MPASS(vmap->vm_private_data == vm_obj->handle);
 
 	VM_OBJECT_WUNLOCK(vm_obj);
+
+	linux_set_current(curthread);
 
 	down_write(&vmap->vm_mm->mmap_sem);
 	if (unlikely(vmap->vm_ops == NULL)) {
@@ -797,9 +798,9 @@ linux_dev_fdopen(struct cdev *dev, int fflags, struct thread *td,
 #define	LINUX_IOCTL_MAX_PTR (LINUX_IOCTL_MIN_PTR + IOCPARM_MAX)
 
 static inline int
-linux_remap_address(void **uaddr, size_t len)
+linux_remap_address(void * __capability *uaddr, size_t len)
 {
-	uintptr_t uaddr_val = (uintptr_t)(*uaddr);
+	vaddr_t uaddr_val = (__cheri_addr vaddr_t)(*uaddr);
 
 	if (unlikely(uaddr_val >= LINUX_IOCTL_MIN_PTR &&
 	    uaddr_val < LINUX_IOCTL_MAX_PTR)) {
@@ -820,47 +821,46 @@ linux_remap_address(void **uaddr, size_t len)
 		}
 
 		/* re-add kernel buffer address */
-		uaddr_val += (uintptr_t)pts->bsd_ioctl_data;
-
-		/* update address location */
-		*uaddr = (void *)uaddr_val;
+		*uaddr =
+		    (__cheri_tocap char * __capability)pts->bsd_ioctl_data +
+		    uaddr_val;
 		return (1);
 	}
 	return (0);
 }
 
 int
-linux_copyin(const void *uaddr, void *kaddr, size_t len)
+linux_copyin(const void * __capability uaddr, void *kaddr, size_t len)
 {
-	if (linux_remap_address(__DECONST(void **, &uaddr), len)) {
+	if (linux_remap_address(__DECONST(void * __capability *, &uaddr), len)) {
 		if (uaddr == NULL)
 			return (-EFAULT);
-		memcpy(kaddr, uaddr, len);
+		memcpy(kaddr, (__cheri_fromcap const void *)uaddr, len);
 		return (0);
 	}
 	return (-copyin(uaddr, kaddr, len));
 }
 
 int
-linux_copyout(const void *kaddr, void *uaddr, size_t len)
+linux_copyout(const void *kaddr, void * __capability uaddr, size_t len)
 {
 	if (linux_remap_address(&uaddr, len)) {
 		if (uaddr == NULL)
 			return (-EFAULT);
-		memcpy(uaddr, kaddr, len);
+		memcpy((__cheri_fromcap void *)uaddr, kaddr, len);
 		return (0);
 	}
 	return (-copyout(kaddr, uaddr, len));
 }
 
 size_t
-linux_clear_user(void *_uaddr, size_t _len)
+linux_clear_user(void * __capability _uaddr, size_t _len)
 {
-	uint8_t *uaddr = _uaddr;
+	uint8_t * __capability uaddr = _uaddr;
 	size_t len = _len;
 
 	/* make sure uaddr is aligned before going into the fast loop */
-	while (((uintptr_t)uaddr & 7) != 0 && len > 7) {
+	while (!__builtin_is_aligned(uaddr, 8) && len > 7) {
 		if (subyte(uaddr, 0))
 			return (_len);
 		uaddr++;
@@ -893,14 +893,14 @@ linux_clear_user(void *_uaddr, size_t _len)
 }
 
 int
-linux_access_ok(const void *uaddr, size_t len)
+linux_access_ok(const void * __capability uaddr, size_t len)
 {
-	uintptr_t saddr;
-	uintptr_t eaddr;
+	vaddr_t saddr;
+	vaddr_t eaddr;
 
 	/* get start and end address */
-	saddr = (uintptr_t)uaddr;
-	eaddr = (uintptr_t)uaddr + len;
+	saddr = (__cheri_addr vaddr_t)uaddr;
+	eaddr = (__cheri_addr vaddr_t)uaddr + len;
 
 	/* verify addresses are valid for userspace */
 	return ((saddr == eaddr) ||
@@ -929,6 +929,7 @@ linux_file_ioctl_sub(struct file *fp, struct linux_file *filp,
     struct thread *td)
 {
 	struct task_struct *task = current;
+	void * __capability udata;
 	unsigned size;
 	int error;
 
@@ -943,17 +944,17 @@ linux_file_ioctl_sub(struct file *fp, struct linux_file *filp,
 		 */
 		task->bsd_ioctl_data = data;
 		task->bsd_ioctl_len = size;
-		data = (void *)LINUX_IOCTL_MIN_PTR;
+		udata = (void * __capability)(uintcap_t)LINUX_IOCTL_MIN_PTR;
 	} else {
 		/* fetch user-space pointer */
-		data = *(void **)data;
+		udata = *(void * __capability *)data;
 	}
 #if defined(__amd64__)
 	if (td->td_proc->p_elf_machine == EM_386) {
 		/* try the compat IOCTL handler first */
 		if (fop->compat_ioctl != NULL) {
 			error = -OPW(fp, td, fop->compat_ioctl(filp,
-			    cmd, (u_long)data));
+			    cmd, (uintcap_t)udata));
 		} else {
 			error = ENOTTY;
 		}
@@ -961,14 +962,14 @@ linux_file_ioctl_sub(struct file *fp, struct linux_file *filp,
 		/* fallback to the regular IOCTL handler, if any */
 		if (error == ENOTTY && fop->unlocked_ioctl != NULL) {
 			error = -OPW(fp, td, fop->unlocked_ioctl(filp,
-			    cmd, (u_long)data));
+			    cmd, (uintcap_t)udata));
 		}
 	} else
 #endif
 	{
 		if (fop->unlocked_ioctl != NULL) {
 			error = -OPW(fp, td, fop->unlocked_ioctl(filp,
-			    cmd, (u_long)data));
+			    cmd, (uintcap_t)udata));
 		} else {
 			error = ENOTTY;
 		}
@@ -1487,6 +1488,7 @@ static int
 linux_file_close(struct file *file, struct thread *td)
 {
 	struct linux_file *filp;
+	int (*release)(struct inode *, struct linux_file *);
 	const struct file_operations *fop;
 	struct linux_cdev *ldev;
 	int error;
@@ -1496,13 +1498,21 @@ linux_file_close(struct file *file, struct thread *td)
 	KASSERT(file_count(filp) == 0,
 	    ("File refcount(%d) is not zero", file_count(filp)));
 
+	if (td == NULL)
+		td = curthread;
+
 	error = 0;
 	filp->f_flags = file->f_flag;
 	linux_set_current(td);
 	linux_poll_wait_dequeue(filp);
 	linux_get_fop(filp, &fop, &ldev);
-	if (fop->release != NULL)
-		error = -OPW(file, td, fop->release(filp->f_vnode, filp));
+	/*
+	 * Always use the real release function, if any, to avoid
+	 * leaking device resources:
+	 */
+	release = filp->f_op->release;
+	if (release != NULL)
+		error = -OPW(file, td, release(filp->f_vnode, filp));
 	funsetown(&filp->f_sigio);
 	if (filp->f_vnode != NULL)
 		vdrop(filp->f_vnode);
@@ -1521,7 +1531,9 @@ linux_file_ioctl(struct file *fp, u_long cmd, void *data, struct ucred *cred,
 	struct linux_file *filp;
 	const struct file_operations *fop;
 	struct linux_cdev *ldev;
-	int error;
+	struct fiodgname_arg *fgn;
+	const char *p;
+	int error, i;
 
 	error = 0;
 	filp = (struct linux_file *)fp->f_data;
@@ -1548,6 +1560,23 @@ linux_file_ioctl(struct file *fp, u_long cmd, void *data, struct ucred *cred,
 		break;
 	case FIOGETOWN:
 		*(int *)data = fgetown(&filp->f_sigio);
+		break;
+	case FIODGNAME:
+#ifdef	COMPAT_FREEBSD32
+	case FIODGNAME_32:
+#endif
+		if (filp->f_cdev == NULL || filp->f_cdev->cdev == NULL) {
+			error = ENXIO;
+			break;
+		}
+		fgn = data;
+		p = devtoname(filp->f_cdev->cdev);
+		i = strlen(p) + 1;
+		if (i > fgn->len) {
+			error = EINVAL;
+			break;
+		}
+		error = copyout(p, fiodgname_buf_get_ptr(fgn, cmd), i);
 		break;
 	default:
 		error = linux_file_ioctl_sub(fp, filp, fop, cmd, data, td);
@@ -1872,14 +1901,19 @@ linux_timer_callback_wrapper(void *context)
 	timer->function(timer->data);
 }
 
-void
+int
 mod_timer(struct timer_list *timer, int expires)
 {
+	int ret;
 
 	timer->expires = expires;
-	callout_reset(&timer->callout,
+	ret = callout_reset(&timer->callout,
 	    linux_timer_jiffies_until(expires),
 	    &linux_timer_callback_wrapper, timer);
+
+	MPASS(ret == 0 || ret == 1);
+
+	return (ret == 1);
 }
 
 void
@@ -1909,9 +1943,47 @@ del_timer(struct timer_list *timer)
 	return (1);
 }
 
+int
+del_timer_sync(struct timer_list *timer)
+{
+
+	if (callout_drain(&(timer)->callout) == -1)
+		return (0);
+	return (1);
+}
+
+/* greatest common divisor, Euclid equation */
+static uint64_t
+lkpi_gcd_64(uint64_t a, uint64_t b)
+{
+	uint64_t an;
+	uint64_t bn;
+
+	while (b != 0) {
+		an = b;
+		bn = a % b;
+		a = an;
+		b = bn;
+	}
+	return (a);
+}
+
+uint64_t lkpi_nsec2hz_rem;
+uint64_t lkpi_nsec2hz_div = 1000000000ULL;
+uint64_t lkpi_nsec2hz_max;
+
+uint64_t lkpi_usec2hz_rem;
+uint64_t lkpi_usec2hz_div = 1000000ULL;
+uint64_t lkpi_usec2hz_max;
+
+uint64_t lkpi_msec2hz_rem;
+uint64_t lkpi_msec2hz_div = 1000ULL;
+uint64_t lkpi_msec2hz_max;
+
 static void
 linux_timer_init(void *arg)
 {
+	uint64_t gcd;
 
 	/*
 	 * Compute an internal HZ value which can divide 2**32 to
@@ -1922,6 +1994,27 @@ linux_timer_init(void *arg)
 	while (linux_timer_hz_mask < (unsigned long)hz)
 		linux_timer_hz_mask *= 2;
 	linux_timer_hz_mask--;
+
+	/* compute some internal constants */
+	
+	lkpi_nsec2hz_rem = hz;
+	lkpi_usec2hz_rem = hz;
+	lkpi_msec2hz_rem = hz;
+
+	gcd = lkpi_gcd_64(lkpi_nsec2hz_rem, lkpi_nsec2hz_div);
+	lkpi_nsec2hz_rem /= gcd;
+	lkpi_nsec2hz_div /= gcd;
+	lkpi_nsec2hz_max = -1ULL / lkpi_nsec2hz_rem;
+
+	gcd = lkpi_gcd_64(lkpi_usec2hz_rem, lkpi_usec2hz_div);
+	lkpi_usec2hz_rem /= gcd;
+	lkpi_usec2hz_div /= gcd;
+	lkpi_usec2hz_max = -1ULL / lkpi_usec2hz_rem;
+
+	gcd = lkpi_gcd_64(lkpi_msec2hz_rem, lkpi_msec2hz_div);
+	lkpi_msec2hz_rem /= gcd;
+	lkpi_msec2hz_div /= gcd;
+	lkpi_msec2hz_max = -1ULL / lkpi_msec2hz_rem;
 }
 SYSINIT(linux_timer, SI_SUB_DRIVERS, SI_ORDER_FIRST, linux_timer_init, NULL);
 
@@ -2417,8 +2510,8 @@ linux_compat_init(void *arg)
 	kobject_init(&linux_root_device.kobj, &linux_dev_ktype);
 	kobject_set_name(&linux_root_device.kobj, "device");
 	linux_root_device.kobj.oidp = SYSCTL_ADD_NODE(NULL,
-	    SYSCTL_CHILDREN(rootoid), OID_AUTO, "device", CTLFLAG_RD, NULL,
-	    "device");
+	    SYSCTL_CHILDREN(rootoid), OID_AUTO, "device",
+	    CTLFLAG_RD | CTLFLAG_MPSAFE, NULL, "device");
 	linux_root_device.bsddev = root_bus;
 	linux_class_misc.name = "misc";
 	class_register(&linux_class_misc);

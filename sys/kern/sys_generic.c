@@ -39,8 +39,6 @@
 #include <sys/cdefs.h>
 __FBSDID("$FreeBSD$");
 
-#define	EXPLICIT_USER_ACCESS
-
 #include "opt_capsicum.h"
 #include "opt_ktrace.h"
 
@@ -702,20 +700,23 @@ sys_ioctl(struct thread *td, struct ioctl_args *uap)
 }
 
 int
-user_ioctl(struct thread *td, int fd, u_long com, void * __capability udata,
-    void *datap, int copycaps)
+user_ioctl(struct thread *td, int fd, u_long ucom,
+    void * __capability udata, void *datap, int copycaps)
 {
 	u_char smalldata[SYS_IOCTL_SMALL_SIZE] __aligned(SYS_IOCTL_SMALL_ALIGN);
+	uint32_t com;
 	int arg, error;
 	u_int size;
 	caddr_t data;
 
-	if (com > 0xffffffff) {
+#ifdef INVARIANTS
+	if (ucom > 0xffffffff) {
 		printf(
 		    "WARNING pid %d (%s): ioctl sign-extension ioctl %lx\n",
-		    td->td_proc->p_pid, td->td_name, com);
-		com &= 0xffffffff;
+		    td->td_proc->p_pid, td->td_name, ucom);
 	}
+#endif
+	com = (uint32_t)ucom;
 
 	/*
 	 * Interpret high order word to find amount of data to be
@@ -1324,7 +1325,7 @@ static __inline int
 getselfd_cap(struct filedesc *fdp, int fd, struct file **fpp)
 {
 
-	return (fget_unlocked(fdp, fd, &cap_event_rights, fpp, NULL));
+	return (fget_unlocked(fdp, fd, &cap_event_rights, fpp));
 }
 
 /*
@@ -1620,7 +1621,6 @@ pollrescan(struct thread *td)
 	td->td_retval[0] = n;
 	return (0);
 }
-
 
 static int
 pollout(struct thread *td, struct pollfd *fds,

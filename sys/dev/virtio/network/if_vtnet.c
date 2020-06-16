@@ -234,7 +234,8 @@ static int	vtnet_tunable_int(struct vtnet_softc *, const char *, int);
 DEBUGNET_DEFINE(vtnet);
 
 /* Tunables. */
-static SYSCTL_NODE(_hw, OID_AUTO, vtnet, CTLFLAG_RD, 0, "VNET driver parameters");
+static SYSCTL_NODE(_hw, OID_AUTO, vtnet, CTLFLAG_RD | CTLFLAG_MPSAFE, 0,
+    "VNET driver parameters");
 static int vtnet_csum_disable = 0;
 TUNABLE_INT("hw.vtnet.csum_disable", &vtnet_csum_disable);
 SYSCTL_INT(_hw_vtnet, OID_AUTO, csum_disable, CTLFLAG_RDTUN,
@@ -639,10 +640,13 @@ vtnet_setup_features(struct vtnet_softc *sc)
 		sc->vtnet_flags |= VTNET_FLAG_MAC;
 	}
 
-	if (virtio_with_feature(dev, VIRTIO_NET_F_MRG_RXBUF)) {
+	if (virtio_with_feature(dev, VIRTIO_NET_F_MRG_RXBUF))
 		sc->vtnet_flags |= VTNET_FLAG_MRG_RXBUFS;
+
+	if (virtio_with_feature(dev, VIRTIO_NET_F_MRG_RXBUF) ||
+	    virtio_with_feature(dev, VIRTIO_F_VERSION_1))
 		sc->vtnet_hdr_size = sizeof(struct virtio_net_hdr_mrg_rxbuf);
-	} else
+	else
 		sc->vtnet_hdr_size = sizeof(struct virtio_net_hdr);
 
 	if (sc->vtnet_flags & VTNET_FLAG_MRG_RXBUFS)
@@ -717,7 +721,7 @@ vtnet_init_rxq(struct vtnet_softc *sc, int id)
 	if (rxq->vtnrx_sg == NULL)
 		return (ENOMEM);
 
-	TASK_INIT(&rxq->vtnrx_intrtask, 0, vtnet_rxq_tq_intr, rxq);
+	NET_TASK_INIT(&rxq->vtnrx_intrtask, 0, vtnet_rxq_tq_intr, rxq);
 	rxq->vtnrx_tq = taskqueue_create(rxq->vtnrx_name, M_NOWAIT,
 	    taskqueue_thread_enqueue, &rxq->vtnrx_tq);
 
@@ -950,7 +954,8 @@ vtnet_setup_interface(struct vtnet_softc *sc)
 	if_initname(ifp, device_get_name(dev), device_get_unit(dev));
 	ifp->if_baudrate = IF_Gbps(10);	/* Approx. */
 	ifp->if_softc = sc;
-	ifp->if_flags = IFF_BROADCAST | IFF_SIMPLEX | IFF_MULTICAST;
+	ifp->if_flags = IFF_BROADCAST | IFF_SIMPLEX | IFF_MULTICAST |
+	    IFF_KNOWSEPOCH;
 	ifp->if_init = vtnet_init;
 	ifp->if_ioctl = vtnet_ioctl;
 	ifp->if_get_counter = vtnet_get_counter;
@@ -1244,17 +1249,17 @@ vtnet_rxq_free_mbufs(struct vtnet_rxq *rxq)
 	struct mbuf *m;
 	int last;
 #ifdef DEV_NETMAP
-	int netmap_bufs = vtnet_netmap_queue_on(rxq->vtnrx_sc, NR_RX,
-						rxq->vtnrx_id);
+	struct netmap_kring *kring = netmap_kring_on(NA(rxq->vtnrx_sc->vtnet_ifp),
+							rxq->vtnrx_id, NR_RX);
 #else  /* !DEV_NETMAP */
-	int netmap_bufs = 0;
+	void *kring = NULL;
 #endif /* !DEV_NETMAP */
 
 	vq = rxq->vtnrx_vq;
 	last = 0;
 
 	while ((m = virtqueue_drain(vq, &last)) != NULL) {
-		if (!netmap_bufs)
+		if (kring == NULL)
 			m_freem(m);
 	}
 
@@ -1457,9 +1462,10 @@ vtnet_rxq_enqueue_buf(struct vtnet_rxq *rxq, struct mbuf *m)
 
 	sglist_reset(sg);
 	if ((sc->vtnet_flags & VTNET_FLAG_MRG_RXBUFS) == 0) {
-		MPASS(sc->vtnet_hdr_size == sizeof(struct virtio_net_hdr));
+		MPASS(sc->vtnet_hdr_size == sizeof(rxhdr->vrh_uhdr.hdr) ||
+		    sc->vtnet_hdr_size == sizeof(rxhdr->vrh_uhdr.mhdr));
 		rxhdr = (struct vtnet_rx_header *) mdata;
-		sglist_append(sg, &rxhdr->vrh_hdr, sc->vtnet_hdr_size);
+		sglist_append(sg, &rxhdr->vrh_uhdr, sc->vtnet_hdr_size);
 		offset = sizeof(struct vtnet_rx_header);
 	} else
 		offset = 0;
@@ -1830,7 +1836,7 @@ vtnet_rxq_eof(struct vtnet_rxq *rxq)
 		    len - adjsz >= ETHER_HDR_LEN + max_protohdr) {
 			pfil = pfil_run_hooks(sc->vtnet_pfil,
 			    m->m_data + adjsz, ifp,
-			    len - adjsz | PFIL_MEMPTR | PFIL_IN, NULL);
+			    (len - adjsz) | PFIL_MEMPTR | PFIL_IN, NULL);
 			switch (pfil) {
 			case PFIL_REALLOCED:
 				mr = pfil_mem2mbuf(m->m_data + adjsz);
@@ -1914,6 +1920,9 @@ vtnet_rx_vq_intr(void *xrxq)
 	struct vtnet_rxq *rxq;
 	struct ifnet *ifp;
 	int tries, more;
+#ifdef DEV_NETMAP
+	int nmirq;
+#endif /* DEV_NETMAP */
 
 	rxq = xrxq;
 	sc = rxq->vtnrx_sc;
@@ -1931,12 +1940,26 @@ vtnet_rx_vq_intr(void *xrxq)
 		return;
 	}
 
-#ifdef DEV_NETMAP
-	if (netmap_rx_irq(ifp, rxq->vtnrx_id, &more) != NM_IRQ_PASS)
-		return;
-#endif /* DEV_NETMAP */
-
 	VTNET_RXQ_LOCK(rxq);
+
+#ifdef DEV_NETMAP
+	/*
+	 * We call netmap_rx_irq() under lock to prevent concurrent calls.
+	 * This is not necessary to serialize the access to the RX vq, but
+	 * rather to avoid races that may happen if this interface is
+	 * attached to a VALE switch, which would cause received packets
+	 * to stall in the RX queue (nm_kr_tryget() could find the kring
+	 * busy when called from netmap_bwrap_intr_notify()).
+	 */
+	nmirq = netmap_rx_irq(ifp, rxq->vtnrx_id, &more);
+	if (nmirq != NM_IRQ_PASS) {
+		VTNET_RXQ_UNLOCK(rxq);
+		if (nmirq == NM_IRQ_RESCHED) {
+			taskqueue_enqueue(rxq->vtnrx_tq, &rxq->vtnrx_intrtask);
+		}
+		return;
+	}
+#endif /* DEV_NETMAP */
 
 again:
 	if ((ifp->if_drv_flags & IFF_DRV_RUNNING) == 0) {
@@ -1969,12 +1992,26 @@ vtnet_rxq_tq_intr(void *xrxq, int pending)
 	struct vtnet_rxq *rxq;
 	struct ifnet *ifp;
 	int more;
+#ifdef DEV_NETMAP
+	int nmirq;
+#endif /* DEV_NETMAP */
 
 	rxq = xrxq;
 	sc = rxq->vtnrx_sc;
 	ifp = sc->vtnet_ifp;
 
 	VTNET_RXQ_LOCK(rxq);
+
+#ifdef DEV_NETMAP
+	nmirq = netmap_rx_irq(ifp, rxq->vtnrx_id, &more);
+	if (nmirq != NM_IRQ_PASS) {
+		VTNET_RXQ_UNLOCK(rxq);
+		if (nmirq == NM_IRQ_RESCHED) {
+			taskqueue_enqueue(rxq->vtnrx_tq, &rxq->vtnrx_intrtask);
+		}
+		return;
+	}
+#endif /* DEV_NETMAP */
 
 	if ((ifp->if_drv_flags & IFF_DRV_RUNNING) == 0) {
 		VTNET_RXQ_UNLOCK(rxq);
@@ -2037,17 +2074,17 @@ vtnet_txq_free_mbufs(struct vtnet_txq *txq)
 	struct vtnet_tx_header *txhdr;
 	int last;
 #ifdef DEV_NETMAP
-	int netmap_bufs = vtnet_netmap_queue_on(txq->vtntx_sc, NR_TX,
-						txq->vtntx_id);
+	struct netmap_kring *kring = netmap_kring_on(NA(txq->vtntx_sc->vtnet_ifp),
+							txq->vtntx_id, NR_TX);
 #else  /* !DEV_NETMAP */
-	int netmap_bufs = 0;
+	void *kring = NULL;
 #endif /* !DEV_NETMAP */
 
 	vq = txq->vtntx_vq;
 	last = 0;
 
 	while ((txhdr = virtqueue_drain(vq, &last)) != NULL) {
-		if (!netmap_bufs) {
+		if (kring == NULL) {
 			m_freem(txhdr->vth_mbuf);
 			uma_zfree(vtnet_tx_header_zone, txhdr);
 		}
@@ -3750,7 +3787,7 @@ vtnet_setup_rxq_sysctl(struct sysctl_ctx_list *ctx,
 
 	snprintf(namebuf, sizeof(namebuf), "rxq%d", rxq->vtnrx_id);
 	node = SYSCTL_ADD_NODE(ctx, child, OID_AUTO, namebuf,
-	    CTLFLAG_RD, NULL, "Receive Queue");
+	    CTLFLAG_RD | CTLFLAG_MPSAFE, NULL, "Receive Queue");
 	list = SYSCTL_CHILDREN(node);
 
 	stats = &rxq->vtnrx_stats;
@@ -3783,7 +3820,7 @@ vtnet_setup_txq_sysctl(struct sysctl_ctx_list *ctx,
 
 	snprintf(namebuf, sizeof(namebuf), "txq%d", txq->vtntx_id);
 	node = SYSCTL_ADD_NODE(ctx, child, OID_AUTO, namebuf,
-	    CTLFLAG_RD, NULL, "Transmit Queue");
+	    CTLFLAG_RD | CTLFLAG_MPSAFE, NULL, "Transmit Queue");
 	list = SYSCTL_CHILDREN(node);
 
 	stats = &txq->vtntx_stats;

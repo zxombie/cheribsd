@@ -67,7 +67,6 @@ __FBSDID("$FreeBSD$");
 #include <sys/user.h>
 #include <sys/buf.h>
 #include <sys/vnode.h>
-#include <sys/pioctl.h>
 #include <sys/sysctl.h>
 #include <sys/syslog.h>
 #include <sys/bus.h>
@@ -145,22 +144,22 @@ SYSCTL_INT(_machdep, OID_AUTO, log_cheri_registers, CTLFLAG_RW,
 
 #define	lwl_macro(data, addr)						\
 	__asm __volatile ("lwl %0, 0x0(%1)"				\
-			: "=r" (data)	/* outputs */			\
+			: "+r" (data)	/* outputs */			\
 			: "r" (addr));	/* inputs */
 
 #define	lwr_macro(data, addr)						\
 	__asm __volatile ("lwr %0, 0x0(%1)"				\
-			: "=r" (data)	/* outputs */			\
+			: "+r" (data)	/* outputs */			\
 			: "r" (addr));	/* inputs */
 
 #define	ldl_macro(data, addr)						\
 	__asm __volatile ("ldl %0, 0x0(%1)"				\
-			: "=r" (data)	/* outputs */			\
+			: "+r" (data)	/* outputs */			\
 			: "r" (addr));	/* inputs */
 
 #define	ldr_macro(data, addr)						\
 	__asm __volatile ("ldr %0, 0x0(%1)"				\
-			: "=r" (data)	/* outputs */			\
+			: "+r" (data)	/* outputs */			\
 			: "r" (addr));	/* inputs */
 
 #define	sb_macro(data, addr)						\
@@ -456,7 +455,7 @@ fetch_instr_near_pc(struct trapframe *frame, register_t offset_from_pc, int32_t 
 #else
 	bad_inst_ptr = __USER_CODE_CAP((uint8_t*)(frame->pc) + offset_from_pc);
 #endif
-	if (fueword32_c(bad_inst_ptr, instr) != 0) {
+	if (fueword32(bad_inst_ptr, instr) != 0) {
 		struct thread *td = curthread;
 		struct proc *p = td->td_proc;
 		log(LOG_ERR, "%s: pid %d tid %ld (%s), uid %d: Could not fetch "
@@ -626,6 +625,8 @@ cpu_fetch_syscall_args(struct thread *td)
 	sa->narg = sa->callp->sy_narg;
 
 	if (sa->narg > nsaved) {
+		char * __capability stack_args;
+
 #if defined(__mips_n32) || defined(__mips_n64)
 		/*
 		 * XXX
@@ -644,20 +645,26 @@ cpu_fetch_syscall_args(struct thread *td)
 			unsigned i;
 			int32_t arg;
 
+			stack_args = __USER_CAP(locr0->sp + 4 * sizeof(int32_t),
+			    (sa->narg - nsaved) * sizeof(int32_t));
 			error = 0; /* XXX GCC is awful.  */
 			for (i = nsaved; i < sa->narg; i++) {
-				error = copyin((caddr_t)(intptr_t)(locr0->sp +
-				    (4 + (i - nsaved)) * sizeof(int32_t)),
-				    (caddr_t)&arg, sizeof arg);
+				error = copyin(stack_args +
+				    (i - nsaved) * sizeof(int32_t),
+				    &arg, sizeof(arg));
 				if (error != 0)
 					break;
 				sa->args[i] = arg;
 			}
 		} else
 #endif
-		error = copyin((caddr_t)(intptr_t)(locr0->sp +
-		    4 * sizeof(register_t)), (caddr_t)&sa->args[nsaved],
-		   (u_int)(sa->narg - nsaved) * sizeof(register_t));
+		{
+			stack_args = __USER_CAP(locr0->sp +
+			    4 * sizeof(register_t), (sa->narg - nsaved) *
+			    sizeof(register_t));
+			error = copyin(stack_args, &sa->args[nsaved],
+			    (u_int)(sa->narg - nsaved) * sizeof(register_t));
+		}
 		if (error != 0) {
 			locr0->v0 = error;
 			locr0->a3 = 1;
@@ -1060,10 +1067,9 @@ dofault:
 #if defined(KDTRACE_HOOKS) || defined(DDB)
 	case T_BREAK:
 #ifdef KDTRACE_HOOKS
-		if (!usermode && dtrace_invop_jump_addr != 0) {
-			dtrace_invop_jump_addr(trapframe);
+		if (!usermode && dtrace_invop_jump_addr != NULL &&
+		    dtrace_invop_jump_addr(trapframe) == 0)
 			return (trapframe->pc);
-		}
 #endif
 #ifdef DDB
 		kdb_trap(type, 0, trapframe);
@@ -1084,13 +1090,13 @@ dofault:
 			if (DELAYBRANCH(trapframe->cause))
 				va += sizeof(int);
 
-			if (td->td_md.md_ss_addr != (__cheri_addr intptr_t)va) {
+			if (td->td_md.md_ss_addr != (__cheri_addr uintptr_t)va) {
 				addr = va;
 				break;
 			}
 
 			/* read break instruction */
-			instr = fuword32_c(__USER_CODE_CAP((__cheri_fromcap void *)va));
+			instr = fuword32(va);
 
 			if (instr != MIPS_BREAK_SSTEP) {
 				addr = va;
@@ -1098,8 +1104,8 @@ dofault:
 			}
 
 			CTR3(KTR_PTRACE,
-			    "trap: tid %d, single step at %p: %#08x",
-			    td->td_tid, (__cheri_fromcap void *)va, instr);
+			    "trap: tid %d, single step at 0x%lx: %#08x",
+			    td->td_tid, (__cheri_addr long)va, instr);
 			PROC_LOCK(p);
 			_PHOLD(p);
 			error = ptrace_clear_single_step(td);
@@ -1187,10 +1193,6 @@ dofault:
 
 	case T_C2E + T_USER:
 		msg = "USER_CHERI_EXCEPTION";
-#ifdef KTRACE
-		if (KTRPOINT(td, KTR_CEXCEPTION))
-			ktrcexception(trapframe);
-#endif
 
 		if (try_emulate_capdirty(trapframe, NULL,
 					 &p->p_vmspace->vm_pmap) == 0) {
@@ -1493,8 +1495,7 @@ trapDump(char *msg)
 /*
  * Return the resulting PC as if the branch was executed.
  *
- * XXXRW: What about CHERI branch instructions?
- * XXXAR: This needs to be fixed for cjalr/cjr/ccall_fast
+ * XXXAR: This needs to be fixed for ccall_fast
  */
 trapf_pc_t
 MipsEmulateBranch(struct trapframe *framePtr, trapf_pc_t _instPC, int fpcCSR,
@@ -1514,22 +1515,16 @@ MipsEmulateBranch(struct trapframe *framePtr, trapf_pc_t _instPC, int fpcCSR,
 	(InstPtr + 4 + ((short)inst.IType.imm << 2))
 
 	if (instptr) {
-		if (!KERNLAND(instptr))
-			inst.word = fuword32((void *)instptr); /* XXXAR: error check? */
-		else
-			inst = *(InstFmt *) instptr;
+		inst = *(InstFmt *) instptr;
 	} else {
 		if (!KERNLAND((__cheri_addr vaddr_t)instPC))
-			inst.word = fuword32_c(instPC);  /* XXXAR: error check? */
+			inst.word = fuword32(instPC);  /* XXXAR: error check? */
 		else
 			memcpy_c(&inst, instPC, sizeof(InstFmt));
 	}
 	/* Save the bad branch instruction so we can log it */
 	framePtr->badinstr_p.inst = inst.word;
 
-	/*
-	 * XXXRW: CHERI branch instructions are not handled here.
-	 */
 	switch ((int)inst.JType.op) {
 	case OP_SPECIAL:
 		switch ((int)inst.RType.func) {
@@ -1651,28 +1646,36 @@ MipsEmulateBranch(struct trapframe *framePtr, trapf_pc_t _instPC, int fpcCSR,
 #ifdef CPU_CHERI
 	case OP_COP2:
 		switch (inst.CType.fmt) {
-		case 0x9:
-		case 0xa:
-		case 0x11:
-		case 0x12:
+		case OP_CJ:
+			switch (inst.CType.r3) {
+			case OP_CJALR:
+				retAddr = capRegsPtr[inst.CType.r2];
+				break;
+			case OP_CJR:
+				retAddr = capRegsPtr[inst.CType.r1];
+				break;
+			}
+			if (retAddr != NULL)
+				return (trapf_pc_t)(retAddr);
+			break;
+		case OP_CBEZ:
+		case OP_CBNZ:
+		case OP_CBTS:
+		case OP_CBTU:
 			switch (inst.BC2FType.fmt) {
-			case 0x9:
-				/* CBTU */
+			case OP_CBTU:
 				condition = !cheri_gettag(
 				    capRegsPtr[inst.BC2FType.cd]);
 				break;
-			case 0xa:
-				/* CBTS */
+			case OP_CBTS:
 				condition = cheri_gettag(
 				    capRegsPtr[inst.BC2FType.cd]);
 				break;
-			case 0x11:
-				/* CBEZ */
+			case OP_CBEZ:
 				condition =
 				    (capRegsPtr[inst.BC2FType.cd] == NULL);
 				break;
-			case 0x12:
-				/* CBNZ */
+			case OP_CBNZ:
 				condition =
 				    (capRegsPtr[inst.BC2FType.cd] != NULL);
 				break;
@@ -1871,7 +1874,7 @@ log_illegal_instruction(const char *msg, struct trapframe *frame)
 	pt_entry_t *ptep;
 	pd_entry_t *pdep;
 #ifndef CPU_CHERI
-	unsigned int *addr;
+	unsigned int *addr, instr[4];
 #endif
 	struct thread *td;
 	struct proc *p;
@@ -1906,21 +1909,17 @@ log_illegal_instruction(const char *msg, struct trapframe *frame)
 	 *
 	 * XXXRW: Temporarily disabled in CHERI as this doesn't properly
 	 * indirect through $c0 / $pcc.
-	 *
-	 * XXXRW: Arguably, this is also incorrect for non-CHERI: it should be
-	 * using copyin() to access user addresses!
 	 */
-	if (!(pc & 3) &&
-	    useracc((caddr_t)(intptr_t)pc, sizeof(int) * 4, VM_PROT_READ)) {
+	addr = (unsigned int *)(intptr_t)pc;
+	if ((pc & 3) == 0 && copyin(addr, instr, sizeof(instr)) == 0) {
 		/* dump page table entry for faulting instruction */
 		log(LOG_ERR, "Page table info for pc address %#jx: pde = %p, pte = %#jx\n",
 		    (intmax_t)pc, (void *)(intptr_t)*pdep, (uintmax_t)(ptep ? *ptep : 0));
 
-		addr = (unsigned int *)(intptr_t)pc;
 		log(LOG_ERR, "Dumping 4 words starting at pc address %p: \n",
 		    addr);
 		log(LOG_ERR, "%08x %08x %08x %08x\n",
-		    addr[0], addr[1], addr[2], addr[3]);
+		    instr[0], instr[1], instr[2], instr[3]);
 	} else {
 		log(LOG_ERR, "pc address %#jx is inaccessible, pde = %p, pte = %#jx\n",
 		    (intmax_t)pc, (void *)(intptr_t)*pdep, (uintmax_t)(ptep ? *ptep : 0));
@@ -1934,7 +1933,7 @@ log_bad_page_fault(char *msg, struct trapframe *frame, int trap_type)
 	pt_entry_t *ptep;
 	pd_entry_t *pdep;
 #ifndef CPU_CHERI
-	unsigned int *addr;
+	unsigned int *addr, instr[4];
 #endif
 	struct thread *td;
 	struct proc *p;
@@ -1994,22 +1993,19 @@ log_bad_page_fault(char *msg, struct trapframe *frame, int trap_type)
 	 *
 	 * XXXRW: Temporarily disabled in CHERI as this doesn't properly
 	 * indirect through $c0 / $pcc.
-	 *
-	 * XXXRW: Arguably, this is also incorrect for non-CHERI: it should be
-	 * using copyin() to access user addresses!
 	 */
-	if (!(pc & 3) && (pc != frame->badvaddr) &&
-	    (trap_type != T_BUS_ERR_IFETCH) &&
-	    useracc((caddr_t)(intptr_t)pc, sizeof(int) * 4, VM_PROT_READ)) {
+	addr = (unsigned int *)(intptr_t)pc;
+	if ((pc & 3) == 0 && pc != frame->badvaddr &&
+	    trap_type != T_BUS_ERR_IFETCH &&
+	    copyin((caddr_t)(intptr_t)pc, instr, sizeof(instr)) == 0) {
 		/* dump page table entry for faulting instruction */
 		log(LOG_ERR, "Page table info for pc address %#jx: pde = %p, pte = %#jx\n",
 		    (intmax_t)pc, (void *)(intptr_t)*pdep, (uintmax_t)(ptep ? *ptep : 0));
 
-		addr = (unsigned int *)(intptr_t)pc;
 		log(LOG_ERR, "Dumping 4 words starting at pc address %p: \n",
 		    addr);
 		log(LOG_ERR, "%08x %08x %08x %08x\n",
-		    addr[0], addr[1], addr[2], addr[3]);
+		    instr[0], instr[1], instr[2], instr[3]);
 	} else {
 		log(LOG_ERR, "pc address %#jx is inaccessible, pde = %p, pte = %#jx\n",
 		    (intmax_t)pc, (void *)(intptr_t)*pdep, (uintmax_t)(ptep ? *ptep : 0));
@@ -2069,7 +2065,7 @@ static int
 mips_unaligned_load_store(struct trapframe *frame, int mode, register_t addr, uint32_t inst)
 {
 	register_t *reg = (register_t *) frame;
-	register_t value;
+	register_t value = 0;
 	unsigned size;
 	int src_regno;
 	int op_type = 0;

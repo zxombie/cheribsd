@@ -31,8 +31,6 @@
 #include <sys/cdefs.h>
 __FBSDID("$FreeBSD$");
 
-#define	EXPLICIT_USER_ACCESS
-
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/capsicum.h>
@@ -85,7 +83,7 @@ kern_extattrctl(struct thread *td, const char * __capability path, int cmd,
 	struct vnode *filename_vp;
 	struct nameidata nd;
 	struct mount *mp, *mp_writable;
-	char attrname[EXTATTR_MAXNAMELEN];
+	char attrname[EXTATTR_MAXNAMELEN + 1];
 	int error;
 
 	AUDIT_ARG_CMD(cmd);
@@ -95,7 +93,7 @@ kern_extattrctl(struct thread *td, const char * __capability path, int cmd,
 	 * invoke the VFS call so as to pass in NULL there if needed.
 	 */
 	if (uattrname != NULL) {
-		error = copyinstr(uattrname, attrname, EXTATTR_MAXNAMELEN,
+		error = copyinstr(uattrname, attrname, sizeof(attrname),
 		    NULL);
 		if (error)
 			return (error);
@@ -243,19 +241,19 @@ kern_extattr_set_fd(struct thread *td, int fd, int attrnamespace,
     size_t nbytes)
 {
 	struct file *fp;
-	char attrname[EXTATTR_MAXNAMELEN];
+	char attrname[EXTATTR_MAXNAMELEN + 1];
 	cap_rights_t rights;
 	int error;
 
 	AUDIT_ARG_FD(fd);
 	AUDIT_ARG_VALUE(attrnamespace);
-	error = copyinstr(uattrname, attrname, EXTATTR_MAXNAMELEN, NULL);
+	error = copyinstr(uattrname, attrname, sizeof(attrname), NULL);
 	if (error)
 		return (error);
 	AUDIT_ARG_TEXT(attrname);
 
 	error = getvnode(td, fd,
-	    cap_rights_init(&rights, CAP_EXTATTR_SET), &fp);
+	    cap_rights_init_one(&rights, CAP_EXTATTR_SET), &fp);
 	if (error)
 		return (error);
 
@@ -307,11 +305,11 @@ kern_extattr_set_path(struct thread *td,
     size_t nbytes, int follow)
 {
 	struct nameidata nd;
-	char attrname[EXTATTR_MAXNAMELEN];
+	char attrname[EXTATTR_MAXNAMELEN + 1];
 	int error;
 
 	AUDIT_ARG_VALUE(attrnamespace);
-	error = copyinstr(uattrname, attrname, EXTATTR_MAXNAMELEN, NULL);
+	error = copyinstr(uattrname, attrname, sizeof(attrname), NULL);
 	if (error)
 		return (error);
 	AUDIT_ARG_TEXT(attrname);
@@ -421,19 +419,19 @@ kern_extattr_get_fd(struct thread *td, int fd, int attrnamespace,
     size_t nbytes)
 {
 	struct file *fp;
-	char attrname[EXTATTR_MAXNAMELEN];
+	char attrname[EXTATTR_MAXNAMELEN + 1];
 	cap_rights_t rights;
 	int error;
 
 	AUDIT_ARG_FD(fd);
 	AUDIT_ARG_VALUE(attrnamespace);
-	error = copyinstr(uattrname, attrname, EXTATTR_MAXNAMELEN, NULL);
+	error = copyinstr(uattrname, attrname, sizeof(attrname), NULL);
 	if (error)
 		return (error);
 	AUDIT_ARG_TEXT(attrname);
 
 	error = getvnode(td, fd,
-	    cap_rights_init(&rights, CAP_EXTATTR_GET), &fp);
+	    cap_rights_init_one(&rights, CAP_EXTATTR_GET), &fp);
 	if (error)
 		return (error);
 
@@ -482,11 +480,11 @@ kern_extattr_get_path(struct thread *td, const char * __capability path,
     void * __capability data, size_t nbytes, int follow)
 {
 	struct nameidata nd;
-	char attrname[EXTATTR_MAXNAMELEN];
+	char attrname[EXTATTR_MAXNAMELEN + 1];
 	int error;
 
 	AUDIT_ARG_VALUE(attrnamespace);
-	error = copyinstr(uattrname, attrname, EXTATTR_MAXNAMELEN, NULL);
+	error = copyinstr(uattrname, attrname, sizeof(attrname), NULL);
 	if (error)
 		return (error);
 	AUDIT_ARG_TEXT(attrname);
@@ -566,19 +564,19 @@ kern_extattr_delete_fd(struct thread *td, int fd, int attrnamespace,
     const char * __capability uattrname)
 {
 	struct file *fp;
-	char attrname[EXTATTR_MAXNAMELEN];
+	char attrname[EXTATTR_MAXNAMELEN + 1];
 	cap_rights_t rights;
 	int error;
 
 	AUDIT_ARG_FD(fd);
 	AUDIT_ARG_VALUE(attrnamespace);
-	error = copyinstr(uattrname, attrname, EXTATTR_MAXNAMELEN, NULL);
+	error = copyinstr(uattrname, attrname, sizeof(attrname), NULL);
 	if (error)
 		return (error);
 	AUDIT_ARG_TEXT(attrname);
 
 	error = getvnode(td, fd,
-	    cap_rights_init(&rights, CAP_EXTATTR_DELETE), &fp);
+	    cap_rights_init_one(&rights, CAP_EXTATTR_DELETE), &fp);
 	if (error)
 		return (error);
 
@@ -623,11 +621,11 @@ kern_extattr_delete_path(struct thread *td, const char * __capability path,
     int attrnamespace, const char * __capability uattrname, int follow)
 {
 	struct nameidata nd;
-	char attrname[EXTATTR_MAXNAMELEN];
+	char attrname[EXTATTR_MAXNAMELEN + 1];
 	int error;
 
 	AUDIT_ARG_VALUE(attrnamespace);
-	error = copyinstr(uattrname, attrname, EXTATTR_MAXNAMELEN, NULL);
+	error = copyinstr(uattrname, attrname, sizeof(attrname), NULL);
 	if (error)
 		return(error);
 	AUDIT_ARG_TEXT(attrname);
@@ -705,7 +703,6 @@ extattr_list_vp(struct vnode *vp, int attrnamespace, void * __capability data,
 	return (error);
 }
 
-
 #ifndef _SYS_SYSPROTO_H_
 struct extattr_list_fd_args {
 	int fd;
@@ -733,7 +730,7 @@ kern_extattr_list_fd(struct thread *td, int fd, int attrnamespace,
 	AUDIT_ARG_FD(fd);
 	AUDIT_ARG_VALUE(attrnamespace);
 	error = getvnode(td, fd,
-	    cap_rights_init(&rights, CAP_EXTATTR_LIST), &fp);
+	    cap_rights_init_one(&rights, CAP_EXTATTR_LIST), &fp);
 	if (error)
 		return (error);
 

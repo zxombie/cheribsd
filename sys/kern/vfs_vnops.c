@@ -135,6 +135,11 @@ static u_long vn_io_faults_cnt;
 SYSCTL_ULONG(_debug, OID_AUTO, vn_io_faults, CTLFLAG_RD,
     &vn_io_faults_cnt, 0, "Count of vn_io_fault lock avoidance triggers");
 
+static int vfs_allow_read_dir = 0;
+SYSCTL_INT(_security_bsd, OID_AUTO, allow_read_dir, CTLFLAG_RW,
+    &vfs_allow_read_dir, 0,
+    "Enable read(2) of directory by root for filesystems that support it");
+
 /*
  * Returns true if vn_io_fault mode of handling the i/o request should
  * be used.
@@ -980,9 +985,9 @@ vn_io_fault_touch(char * __capability base, const struct uio *uio)
 {
 	int r;
 
-	r = fubyte_c(base);
+	r = fubyte(base);
 	if (r == -1 || (uio->uio_rw == UIO_READ &&
-	    subyte_c(base, r) == -1))
+	    subyte(base, r) == -1))
 		return (EFAULT);
 	return (0);
 }
@@ -1159,6 +1164,24 @@ vn_io_fault(struct file *fp, struct uio *uio, struct ucred *active_cred,
 
 	doio = uio->uio_rw == UIO_READ ? vn_read : vn_write;
 	vp = fp->f_vnode;
+
+	/*
+	 * The ability to read(2) on a directory has historically been
+	 * allowed for all users, but this can and has been the source of
+	 * at least one security issue in the past.  As such, it is now hidden
+	 * away behind a sysctl for those that actually need it to use it, and
+	 * restricted to root when it's turned on to make it relatively safe to
+	 * leave on for longer sessions of need.
+	 */
+	if (vp->v_type == VDIR) {
+		KASSERT(uio->uio_rw == UIO_READ,
+		    ("illegal write attempted on a directory"));
+		if (!vfs_allow_read_dir)
+			return (EISDIR);
+		if ((error = priv_check(td, PRIV_VFS_READ_DIR)) != 0)
+			return (EISDIR);
+	}
+
 	foffset_lock_uio(fp, uio, flags);
 	if (do_vn_io_fault(vp, uio)) {
 		args.kind = VN_IO_FAULT_FOP;
@@ -1289,7 +1312,6 @@ vn_io_fault_pgmove(vm_page_t ma[], vm_offset_t offset, int xfersize,
 	uio->uio_offset += cnt;
 	return (0);
 }
-
 
 /*
  * File table truncate routine.
@@ -1475,7 +1497,7 @@ vn_stat(struct vnode *vp, struct stat *sb, struct ucred *active_cred,
 	sb->st_blksize = max(PAGE_SIZE, vap->va_blocksize);
 	
 	sb->st_flags = vap->va_flags;
-	if (priv_check(td, PRIV_VFS_GENERATION))
+	if (priv_check_cred_vfs_generation(td->td_ucred))
 		sb->st_gen = 0;
 	else
 		sb->st_gen = vap->va_gen;
@@ -1564,7 +1586,8 @@ vn_poll(struct file *fp, int events, struct ucred *active_cred,
  * permits vn_lock to return doomed vnodes.
  */
 static int __noinline
-_vn_lock_fallback(struct vnode *vp, int flags, char *file, int line, int error)
+_vn_lock_fallback(struct vnode *vp, int flags, const char *file, int line,
+    int error)
 {
 
 	KASSERT((flags & LK_RETRY) == 0 || error == 0,
@@ -1600,12 +1623,13 @@ _vn_lock_fallback(struct vnode *vp, int flags, char *file, int line, int error)
 }
 
 int
-_vn_lock(struct vnode *vp, int flags, char *file, int line)
+_vn_lock(struct vnode *vp, int flags, const char *file, int line)
 {
 	int error;
 
-	VNASSERT((flags & LK_TYPE_MASK) != 0, vp, ("vn_lock: no locktype"));
-	VNASSERT(vp->v_holdcnt != 0, vp, ("vn_lock: zero hold count"));
+	VNASSERT((flags & LK_TYPE_MASK) != 0, vp,
+	    ("vn_lock: no locktype (%d passed)", flags));
+	VNPASS(vp->v_holdcnt > 0, vp);
 	error = VOP_LOCK1(vp, flags, file, line);
 	if (__predict_false(error != 0 || VN_IS_DOOMED(vp)))
 		return (_vn_lock_fallback(vp, flags, file, line, error));
@@ -1638,13 +1662,6 @@ vn_closefile(struct file *fp, struct thread *td)
 		vrele(vp);
 	}
 	return (error);
-}
-
-static bool
-vn_suspendable(struct mount *mp)
-{
-
-	return (mp->mnt_op->vfs_susp_clean != NULL);
 }
 
 /*
@@ -1726,12 +1743,6 @@ vn_start_write(struct vnode *vp, struct mount **mpp, int flags)
 	if ((mp = *mpp) == NULL)
 		return (0);
 
-	if (!vn_suspendable(mp)) {
-		if (vp != NULL || (flags & V_MNTREF) != 0)
-			vfs_rel(mp);
-		return (0);
-	}
-
 	/*
 	 * VOP_GETWRITEMOUNT() returns with the mp refcount held through
 	 * a vfs_ref().
@@ -1777,12 +1788,6 @@ vn_start_secondary_write(struct vnode *vp, struct mount **mpp, int flags)
 	if ((mp = *mpp) == NULL)
 		return (0);
 
-	if (!vn_suspendable(mp)) {
-		if (vp != NULL || (flags & V_MNTREF) != 0)
-			vfs_rel(mp);
-		return (0);
-	}
-
 	/*
 	 * VOP_GETWRITEMOUNT() returns with the mp refcount held through
 	 * a vfs_ref().
@@ -1826,7 +1831,7 @@ vn_finished_write(struct mount *mp)
 {
 	int c;
 
-	if (mp == NULL || !vn_suspendable(mp))
+	if (mp == NULL)
 		return;
 
 	if (vfs_op_thread_enter(mp)) {
@@ -1852,7 +1857,6 @@ vn_finished_write(struct mount *mp)
 	MNT_IUNLOCK(mp);
 }
 
-
 /*
  * Filesystem secondary write operation has completed. If we are
  * suspending and this operation is the last one, notify the suspender
@@ -1861,7 +1865,7 @@ vn_finished_write(struct mount *mp)
 void
 vn_finished_secondary_write(struct mount *mp)
 {
-	if (mp == NULL || !vn_suspendable(mp))
+	if (mp == NULL)
 		return;
 	MNT_ILOCK(mp);
 	MNT_REL(mp);
@@ -1874,8 +1878,6 @@ vn_finished_secondary_write(struct mount *mp)
 	MNT_IUNLOCK(mp);
 }
 
-
-
 /*
  * Request a filesystem to suspend write operations.
  */
@@ -1883,8 +1885,6 @@ int
 vfs_write_suspend(struct mount *mp, int flags)
 {
 	int error;
-
-	MPASS(vn_suspendable(mp));
 
 	vfs_op_enter(mp);
 
@@ -1922,7 +1922,7 @@ vfs_write_suspend(struct mount *mp, int flags)
 		MNT_IUNLOCK(mp);
 	if ((error = VFS_SYNC(mp, MNT_SUSPEND)) != 0) {
 		vfs_write_resume(mp, 0);
-		vfs_op_exit(mp);
+		/* vfs_write_resume does vfs_op_exit() for us */
 	}
 	return (error);
 }
@@ -1933,8 +1933,6 @@ vfs_write_suspend(struct mount *mp, int flags)
 void
 vfs_write_resume(struct mount *mp, int flags)
 {
-
-	MPASS(vn_suspendable(mp));
 
 	MNT_ILOCK(mp);
 	if ((mp->mnt_kern_flag & MNTK_SUSPEND) != 0) {
@@ -1970,7 +1968,6 @@ vfs_write_suspend_umnt(struct mount *mp)
 {
 	int error;
 
-	MPASS(vn_suspendable(mp));
 	KASSERT((curthread->td_pflags & TDP_IGNSUSP) == 0,
 	    ("vfs_write_suspend_umnt: recursed"));
 

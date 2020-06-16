@@ -37,8 +37,6 @@ __FBSDID("$FreeBSD$");
 #include "opt_ktrace.h"
 #include "opt_posix.h"
 
-#define	EXPLICIT_USER_ACCESS
-
 #include <sys/param.h>
 #include <sys/signal.h>
 #include <sys/syscallsubr.h>
@@ -173,4 +171,12 @@ cheriabi_sigqueue(struct thread *td, struct cheriabi_sigqueue_args *uap)
 		sv.sival_int = value_union.sival_int;
 	}
 	return (kern_sigqueue(td, uap->pid, uap->signum, &sv));
+}
+
+int
+cheriabi_sigfastblock(struct thread *td,
+    struct cheriabi_sigfastblock_args *uap)
+{
+
+	return (kern_sigfastblock(td, uap->cmd, uap->ptr));
 }

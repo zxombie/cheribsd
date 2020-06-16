@@ -46,11 +46,18 @@ SUBDIR.${MK_LIBCHERI}+=	cheri_bench
 .endif
 
 # Small cheri programs
+.if ${MACHINE_ABI:Mpurecap} || ${MK_COMPAT_CHERIABI} == "yes"
+.if ${MACHINE} == "mips"
+# link failure on riscv
 SUBDIR.${MK_CHERI}+=	cheri_minimal_dynamic_exe
 SUBDIR.${MK_CHERI}+=	cheri_minimal_pie_exe
+# mips assembly
 SUBDIR.${MK_CHERI}+=	cheri_pthreads
+.endif
 SUBDIR.${MK_CHERI}+=	helloworld
+.if ${MK_CXX} != "no" && ${MACHINE} != riscv
 SUBDIR.${MK_CHERI}+=	helloworld_cxx
+.endif
 SUBDIR.${MK_CHERI}+=	helloworld_static
 SUBDIR.${MK_CHERI}+=	cheri_bench_malloc
 
@@ -67,6 +74,8 @@ SUBDIR.${MK_CHERI}+=	cheritest
 SUBDIR.${MK_CHERI}+=	cheritest-dynamic
 SUBDIR.${MK_CHERI}+=	cheritest-dynamic-mt
 SUBDIR.${MK_CHERI}+=	cheritest-mt
+.endif  # ${MACHINE_ABI:Mpurecap} || ${MK_COMPAT_CHERIABI} == "yes"
+
 
 .include <bsd.arch.inc.mk>
 

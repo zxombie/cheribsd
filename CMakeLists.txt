@@ -3,6 +3,7 @@ set(CMAKE_SYSTEM_NAME FreeBSD)
 set(CMAKE_TRY_COMPILE_TARGET_TYPE STATIC_LIBRARY)
 cmake_minimum_required(VERSION 3.8)
 project(CheriBSD LANGUAGES NONE)
+set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 set(TARGET "" CACHE STRING "Target machine.")
 set(TARGET_ARCH "" CACHE STRING "Target machine arch.")
@@ -19,9 +20,21 @@ set(MACHINE_HEADERS "${CMAKE_SOURCE_DIR}/sys/${TARGET}/include")
 if("${TARGET}" STREQUAL "mips")
     if("${TARGET_ARCH}" STREQUAL "mips64")
         add_compile_options(-mabi=n64)
-        set(CLANG_TRIPLE mips64-unknown-freebsd12)
+        set(CLANG_TRIPLE mips64-unknown-freebsd13)
+        add_compile_definitions(__mips__)
+        add_compile_definitions(__mips_n64)
     else()
         message(FATAL_ERROR "Unsupported MIPS TARGET_ARCH: ${TARGET}:${TARGET_ARCH}!")
+    endif()
+elseif("${TARGET}" STREQUAL "riscv")
+    if("${TARGET_ARCH}" STREQUAL "riscv64")
+        add_compile_options(-mabi=lp64)
+        set(CLANG_TRIPLE riscv64-unknown-freebsd13)
+        add_compile_definitions(__riscv)
+        add_compile_definitions(__riscv__)
+        add_compile_definitions(__riscv_xlen=64)
+    else()
+        message(FATAL_ERROR "Unsupported RISC-V TARGET_ARCH: ${TARGET}:${TARGET_ARCH}!")
     endif()
 else()
     message(FATAL_ERROR "Unsupported TARGET: ${TARGET}:${TARGET_ARCH}!")
@@ -29,9 +42,11 @@ endif()
 
 include_directories(${CMAKE_SOURCE_DIR}/include)
 include_directories(${CMAKE_SOURCE_DIR}/sys)
+include_directories(${CMAKE_SOURCE_DIR}/contrib/libxo)
+include_directories(${CMAKE_SOURCE_DIR}/contrib/libc-vis)
 
 set(TMPSYSROOT ${CMAKE_BINARY_DIR}/sysroot/usr)
-add_compile_options(--sysroot=${CMAKE_BINARY_DIR}/sysroot/)
+file(MAKE_DIRECTORY ${TMPSYSROOT}/include/)
 
 # Create symlinks
 execute_process(COMMAND ${CMAKE_COMMAND} -E create_symlink ${MACHINE_HEADERS} ${TMPSYSROOT}/include/machine)
@@ -45,16 +60,86 @@ execute_process(COMMAND ${CMAKE_COMMAND} -E create_symlink ${CMAKE_SOURCE_DIR}/c
 file(MAKE_DIRECTORY ${TMPSYSROOT}/kern_opt)
 file(WRITE ${CMAKE_BINARY_DIR}/kern_opt/opt_ddb.h "#define DDB 1\n")
 file(WRITE ${CMAKE_BINARY_DIR}/kern_opt/opt_ktrace.h "#define KTRACE 1\n")
-file(WRITE ${CMAKE_BINARY_DIR}/kern_opt/opt_global.h "#define KDB 1
+file(WRITE ${CMAKE_BINARY_DIR}/cheri_builtins.h "
+// Pretend that we have capabilities in CLion
+#ifdef __JETBRAINS_IDE__
+#define __CHERI__
+#define __has_feature(x) __fake_has_feature_##x
+#define __fake_has_feature_capabilities 1
+// But we don't really so define __capability to nothing
+#define __capability
+// And provide the builtins for code completion
+long __builtin_cheri_length_get(const void* __capability);
+long __builtin_cheri_base_get(const void* __capability);
+long __builtin_cheri_offset_get(const void* __capability);
+long __builtin_cheri_address_get(const void* __capability);
+long __builtin_cheri_flags_get(const void* __capability);
+long __builtin_cheri_perms_get(const void* __capability);
+long __builtin_cheri_sealed_get(const void* __capability);
+long __builtin_cheri_tag_get(const void* __capability);
+long __builtin_cheri_type_get(const void* __capability));
+void* __capability __builtin_cheri_perms_and(const void* __capability, long);
+void* __capability __builtin_cheri_tag_clear(const void* __capability);
+void* __capability __builtin_cheri_offset_increment(const void* __capability, long);
+void* __capability __builtin_cheri_offset_set(const void* __capability, long);
+void* __capability __builtin_cheri_address_set(const void* __capability, long);
+void* __capability __builtin_cheri_flags_set(const void* __capability, long);
+void* __capability __builtin_cheri_seal(const void* __capability, void* __capability);
+void* __capability __builtin_cheri_unseal(const void* __capability, void* __capability);
+void __builtin_cheri_perms_check(const void* __capability, long);
+void __builtin_cheri_type_check(const void* __capability, const void* __capability);
+void* __capability __builtin_cheri_global_data_get(void);
+void* __capability __builtin_cheri_program_counter_get(void);
+void* __capability __builtin_cheri_stack_get(void);
+void* __capability __builtin_cheri_bounds_set(const void* __capability, long);
+void* __capability __builtin_cheri_bounds_set_exact(const void* __capability, long);
+// Also define some compiler defines:
+#define __CHERI_ADDRESS_BITS__ 64
+#define __CHERI_CAPABILITY_WIDTH__ 128
+#define __CHERI_CAP_PERMISSION_ACCESS_SYSTEM_REGISTERS__ 1024
+#define __CHERI_CAP_PERMISSION_GLOBAL__ 1
+#define __CHERI_CAP_PERMISSION_PERMIT_CCALL__ 256
+#define __CHERI_CAP_PERMISSION_PERMIT_EXECUTE__ 2
+#define __CHERI_CAP_PERMISSION_PERMIT_LOAD_CAPABILITY__ 16
+#define __CHERI_CAP_PERMISSION_PERMIT_LOAD__ 4
+#define __CHERI_CAP_PERMISSION_PERMIT_SEAL__ 128
+#define __CHERI_CAP_PERMISSION_PERMIT_STORE_CAPABILITY__ 32
+#define __CHERI_CAP_PERMISSION_PERMIT_STORE_LOCAL__ 64
+#define __CHERI_CAP_PERMISSION_PERMIT_STORE__ 8
+#define __CHERI_CAP_PERMISSION_PERMIT_UNSEAL__ 512
+#define __SIZEOF_CHERI_CAPABILITY__ 16
+#define __SIZEOF_UINTCAP__ 16
+#define __SIZEOF_INTCAP__ 16
+#endif /* __JETBRAINS_IDE__ */
+")
+
+file(WRITE ${CMAKE_BINARY_DIR}/cheri_purecap.h "
+// Pretend that we have capabilities in CLion
+#ifdef __JETBRAINS_IDE__
+#define __CHERI_PURE_CAPABILITY__ 1
+#define __CHERI_CAPABILITY_TABLE__ 3
+#include \"cheri_builtins.h\"
+#endif
+")
+add_compile_options(-include ${CMAKE_BINARY_DIR}/cheri_purecap.h)
+
+file(WRITE ${CMAKE_BINARY_DIR}/kern_opt/opt_global.h "
+#include \"../cheri_builtins.h\"
+#undef __CHERI_PURE_CAPABILITY__
+#define KDB 1
 // #define COMPAT_FREEBSD11 1
 #define COMPAT_CHERIABI 1
+#define COMPAT_FREEBSD32 1
+#define COMPAT_FREEBSD64 1
 #define CPU_CHERI 1
-// #define INVARIANT_SUPPORT 1
+#define INVARIANT_SUPPORT 1
+#define INVARIANTS 1
+#define FDT 1
 #define CPU_MALTA 1
-// #define COMPAT_FREEBSD32 1
 #define TICK_USE_YAMON_FREQ defined
 #define YAMON 1
-// #define INVARIANTS 1
+#define INVARIANTS 1
+#define CPU_QEMU_RISCV
 // #define MAC 1
 // #define AUDIT 1")
 
@@ -73,14 +158,14 @@ message(STATUS "BUILTIN_HEADERS_DIR=${BUILTIN_HEADERS_DIR}")
 add_compile_options(-idirafter ${BUILTIN_HEADERS_DIR}/include)
 
 add_subdirectory(libexec/rtld-cheri-elf)
-file(GLOB_RECURSE FAKE_KERNEL_SRCS_MIPS sys/mips "*.c")
-file(GLOB_RECURSE FAKE_KERNEL_SRCS_DDB sys/ddb "*.c")
-file(GLOB_RECURSE FAKE_KERNEL_SRCS_CHERI sys/cheri "*.c")
-file(GLOB_RECURSE FAKE_KERNEL_SRCS_CHERIABI sys/compat/cheriabi "*.c")
-file(GLOB_RECURSE FAKE_KERNEL_SRCS_KERN sys/kern "*.c")
-file(GLOB_RECURSE FAKE_KERNEL_SRCS_LIBKERN sys/libkern "*.c")
-add_library(fake_kernel STATIC ${FAKE_KERNEL_SRCS_MIPS} ${FAKE_KERNEL_SRCS_DDB} ${FAKE_KERNEL_SRCS_CHERI} ${FAKE_KERNEL_SRCS_CHERIABI} ${FAKE_KERNEL_SRCS_KERN} ${FAKE_KERNEL_SRCS_LIBKERN})
+file(GLOB_RECURSE FAKE_KERNEL_SRCS_TARGET LIST_DIRECTORIES FALSE "sys/${TARGET}/*.c")
+file(GLOB_RECURSE FAKE_KERNEL_SRCS_DDB "sys/ddb/*.c")
+file(GLOB_RECURSE FAKE_KERNEL_SRCS_CHERI "sys/cheri/*.c")
+file(GLOB_RECURSE FAKE_KERNEL_SRCS_CHERIABI "sys/compat/cheriabi/*.c")
+file(GLOB_RECURSE FAKE_KERNEL_SRCS_KERN "sys/kern/*.c")
+file(GLOB_RECURSE FAKE_KERNEL_SRCS_LIBKERN "sys/libkern/*.c")
+add_library(fake_kernel STATIC ${FAKE_KERNEL_SRCS_TARGET} ${FAKE_KERNEL_SRCS_DDB} ${FAKE_KERNEL_SRCS_CHERI} ${FAKE_KERNEL_SRCS_CHERIABI} ${FAKE_KERNEL_SRCS_KERN} ${FAKE_KERNEL_SRCS_LIBKERN})
 target_compile_definitions(fake_kernel PRIVATE _KERNEL=1)
-target_include_directories(fake_kernel PRIVATE ${CMAKE_SOURCE_DIR}/sys)
 target_include_directories(fake_kernel PRIVATE ${CMAKE_BINARY_DIR}/kern_opt)
-target_compile_options(fake_kernel PRIVATE -include ${CMAKE_BINARY_DIR}/kern_opt/opt_global.h)
+target_include_directories(fake_kernel PRIVATE ${CMAKE_SOURCE_DIR}/sys/contrib/ck/include)
+target_compile_options(fake_kernel PRIVATE "-include${CMAKE_BINARY_DIR}/kern_opt/opt_global.h")

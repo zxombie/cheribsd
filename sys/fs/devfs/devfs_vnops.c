@@ -41,8 +41,6 @@
  *	mkdir: want it ?
  */
 
-#define	EXPLICIT_USER_ACCESS
-
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/conf.h>
@@ -277,7 +275,7 @@ devfs_vptocnp(struct vop_vptocnp_args *ap)
 	struct vnode **dvp = ap->a_vpp;
 	struct devfs_mount *dmp;
 	char *buf = ap->a_buf;
-	int *buflen = ap->a_buflen;
+	size_t *buflen = ap->a_buflen;
 	struct devfs_dirent *dd, *de;
 	int i, error;
 
@@ -482,8 +480,7 @@ loop:
 		dev_refl(dev);
 		/* XXX: v_rdev should be protect by vnode lock */
 		vp->v_rdev = dev;
-		KASSERT(vp->v_usecount == 1,
-		    ("%s %d (%d)\n", __func__, __LINE__, vp->v_usecount));
+		VNPASS(vp->v_usecount == 1, vp);
 		dev->si_usecount++;
 		/* Special casing of ttys for deadfs.  Probably redundant. */
 		dsw = dev->si_devsw;
@@ -766,26 +763,27 @@ fiodgname_buf_get_ptr(void *fgnp, u_long com)
 {
 	union {
 		struct fiodgname_arg	fgn;
-#ifdef COMPAT_CHERIABI
-		struct fiodgname_arg_c	fgn_c;
-#endif
 #ifdef COMPAT_FREEBSD32
 		struct fiodgname_arg32	fgn32;
+#endif
+#ifdef COMPAT_FREEBSD64
+		struct fiodgname_arg64	fgn64;
 #endif
 	} *fgnup;
 
 	fgnup = fgnp;
 	switch (com) {
 	case FIODGNAME:
-		return (__USER_CAP(fgnup->fgn.buf, fgnup->fgn.len));
-#ifdef COMPAT_CHERIABI
-	case FIODGNAME_C:
-		return (fgnup->fgn_c.buf);
-#endif
+		return (fgnup->fgn.buf);
 #ifdef COMPAT_FREEBSD32
 	case FIODGNAME_32:
 		return (__USER_CAP((void *)(uintptr_t)fgnup->fgn32.buf,
 		    fgnup->fgn32.len));
+#endif
+#ifdef COMPAT_FREEBSD64
+	case FIODGNAME_64:
+		return (__USER_CAP((void *)(uintptr_t)fgnup->fgn64.buf,
+		    fgnup->fgn64.len));
 #endif
 	default:
 		panic("Unhandled ioctl command %ld", com);
@@ -820,11 +818,11 @@ devfs_ioctl(struct vop_ioctl_args *ap)
 		error = 0;
 		break;
 	case FIODGNAME:
-#ifdef COMPAT_CHERIABI
-	case FIODGNAME_C:
-#endif
 #ifdef	COMPAT_FREEBSD32
 	case FIODGNAME_32:
+#endif
+#ifdef	COMPAT_FREEBSD64
+	case FIODGNAME_64:
 #endif
 		fgn = ap->a_data;
 		p = devtoname(dev);
@@ -960,8 +958,8 @@ devfs_lookupx(struct vop_lookup_args *ap, int *dm_unlock)
 	if ((flags & ISDOTDOT) && (dvp->v_vflag & VV_ROOT))
 		return (EIO);
 
-	error = VOP_ACCESS(dvp, VEXEC, cnp->cn_cred, td);
-	if (error)
+	error = vn_dir_check_exec(dvp, cnp);
+	if (error != 0)
 		return (error);
 
 	if (cnp->cn_namelen == 1 && *pname == '.') {

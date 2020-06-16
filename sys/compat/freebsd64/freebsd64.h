@@ -39,11 +39,10 @@
 #ifndef _COMPAT_FREEBSD64_FREEBSD64_H_
 #define _COMPAT_FREEBSD64_FREEBSD64_H_
 
+#include <sys/abi_compat.h>
 #include <sys/uio.h>
 #include <sys/proc.h>
 #include <sys/user.h>
-
-#define CP(src,dst,fld) do { (dst).fld = (src).fld; } while (0)
 
 struct jail64 {
 	uint32_t	version;
@@ -167,6 +166,13 @@ struct kinfo_proc64 {
 	long	ki_tdflags;
 };
 
+struct kinfo_sigtramp64 {
+	uint64_t ksigtramp_start;
+	uint64_t ksigtramp_end;
+	uint64_t ksigtramp_spare[4];
+};
+
+
 struct kld_file_stat64 {
     int		version;	/* set to sizeof(struct kld_file_stat64) */
     char        name[MAXPATHLEN];
@@ -212,4 +218,4 @@ struct iovec64 {
 	size_t	iov_len;
 };
 
-#endif /* !_COMPAT_CHERIABI_CHERIABI_H_ */
+#endif /* !_COMPAT_FREEBSD64_FREEBSD64_H_ */
