@@ -2252,18 +2252,3 @@ vm_mmap_to_errno(int rv)
 // }
 // CHERI CHANGES END
 
-/* This is almost surely the wrong place for this */
-int
-sys_caprevoke(struct thread *td, struct caprevoke_args *uap)
-{
-	return ENOSYS;
-}
-int
-sys_caprevoke_shadow(struct thread *td, struct caprevoke_shadow_args *uap)
-{
-	return ENOSYS;
-}
-int sys_caprevoke_entire_shadow_cap(struct thread *td, struct caprevoke_entire_shadow_cap_args *uap)
-{
-	return ENOSYS;
-}

@@ -1943,3 +1943,41 @@ cheriabi_ptrace(struct thread *td, struct cheriabi_ptrace_args *uap)
 
 	return (error);
 }
+
+int
+cheriabi_caprevoke(struct thread *td, struct cheriabi_caprevoke_args *uap)
+{
+#ifdef CHERI_CAPREVOKE
+	return kern_caprevoke(td, uap->flags, uap->start_epoch, uap->statout);
+#else
+	struct caprevoke_stats stat = { 0 };
+	copyout(&stat, uap->statout, sizeof (stat));
+	return ENOSYS;
+#endif
+}
+
+int
+cheriabi_caprevoke_shadow(struct thread *td,
+		struct cheriabi_caprevoke_shadow_args *uap)
+{
+#ifdef CHERI_CAPREVOKE
+	return kern_caprevoke_shadow(uap->flags, uap->arena, uap->shadow);
+#else
+	void * __capability cres = NULL;
+	copyoutcap(&cres, uap->shadow, sizeof(cres));
+	return ENOSYS;
+#endif
+}
+
+int
+cheriabi_caprevoke_entire_shadow_cap(struct thread *td,
+		struct cheriabi_caprevoke_entire_shadow_cap_args *uap)
+{
+#ifdef CHERI_CAPREVOKE
+	return kern_caprevoke_entire_shadow_cap(uap->shadow);
+#else
+	void * __capability cres = NULL;
+	copyoutcap(&cres, uap->shadow, sizeof(cres));
+	return ENOSYS;
+#endif
+}
